@@ -6,6 +6,7 @@ import uuid
 import smtplib
 import ssl
 import time
+import hmac
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -17,6 +18,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 try:
@@ -118,6 +120,22 @@ def load_state():
     evidence_files_list = state.get('evidence_files') or DEFAULT_EVIDENCE_FILES
 
     return users, complaints, departments_list, categories_list, evidence_files_list
+
+
+def hash_password(password):
+    return generate_password_hash(password)
+
+
+def verify_password(stored_password, password):
+    if not isinstance(stored_password, str):
+        return False
+    if stored_password.startswith(('scrypt:', 'pbkdf2:')):
+        return check_password_hash(stored_password, password)
+    return hmac.compare_digest(stored_password.encode('utf-8'), password.encode('utf-8'))
+
+
+def is_hashed_password(password):
+    return isinstance(password, str) and password.startswith(('scrypt:', 'pbkdf2:'))
 
 
 def normalize_category(category):
@@ -907,7 +925,10 @@ def login():
             return render_template('login.html', departments=departments)
 
         user = users_db.get(username)
-        if user and user['password'] == password and user['role'] == role:
+        if user and verify_password(user.get('password'), password) and user['role'] == role:
+            if not is_hashed_password(user.get('password')):
+                user['password'] = hash_password(password)
+                persist_state()
             session['username'] = username
             session['full_name'] = user['full_name']
             session['role'] = user['role']
@@ -940,18 +961,24 @@ def register():
         if not username or not full_name or not password:
             flash('Name, username, and password are required.', 'danger')
             return render_template('register.html')
+        if role != 'student':
+            flash('Staff and administrator accounts must be created by an administrator.', 'danger')
+            return render_template('register.html')
         if not is_valid_email_address(email):
             flash('Please enter a valid email address for account updates.', 'danger')
             return render_template('register.html')
         if role == 'student' and (not username.isdigit() or len(username) != 9):
             flash('Student username must be exactly 9 digits.', 'danger')
             return render_template('register.html')
+        if len(password) < 8:
+            flash('Passwords must be at least 8 characters long.', 'danger')
+            return render_template('register.html')
 
         if username in users_db:
             flash('Username already exists.', 'danger')
         else:
             users_db[username] = {
-                'password': password,
+                'password': hash_password(password),
                 'full_name': full_name,
                 'role': role,
                 'email': email,
@@ -1032,7 +1059,7 @@ def reset_password(token):
         elif new_password != confirm_password:
             flash('The password confirmation does not match.', 'danger')
         else:
-            user['password'] = new_password
+            user['password'] = hash_password(new_password)
             user['password_reset_token_version'] = uuid.uuid4().hex
             persist_state()
             flash('Your password has been reset. Please log in with your new password.', 'success')
@@ -1365,9 +1392,11 @@ def add_user():
         flash('Please enter a valid email address for the new user.', 'danger')
     elif username in users_db:
         flash(f'User {username} already exists.', 'danger')
+    elif len(request.form.get('password', '')) < 8:
+        flash('Passwords must be at least 8 characters long.', 'danger')
     else:
         users_db[username] = {
-            'password': request.form.get('password', '123'),
+            'password': hash_password(request.form.get('password', '')),
             'full_name': full_name,
             'role': role,
             'department': department,
@@ -1414,7 +1443,7 @@ def reset_user_password(username):
     elif new_password != confirm_password:
         flash('The password confirmation does not match.', 'danger')
     else:
-        user['password'] = new_password
+        user['password'] = hash_password(new_password)
         user['password_reset_token_version'] = uuid.uuid4().hex
         persist_state()
         flash(f'Password reset for {username}. Share the new password with the user directly.', 'success')
@@ -1648,4 +1677,4 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)

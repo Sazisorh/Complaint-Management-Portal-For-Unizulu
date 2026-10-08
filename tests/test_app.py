@@ -940,7 +940,7 @@ def test_login_requires_role_selection_and_student_dashboard_has_blank_default_c
     assert 'NSFAS' not in dashboard_html
 
 
-def test_admin_options_are_available_in_login_and_register():
+def test_admin_option_is_available_in_login_but_not_public_registration():
     login_response = app.test_client().get('/login')
     register_response = app.test_client().get('/register')
     admin_client = app.test_client()
@@ -952,7 +952,7 @@ def test_admin_options_are_available_in_login_and_register():
     assert login_response.status_code == 200
     assert b'Administrator' in login_response.data
     assert register_response.status_code == 200
-    assert b'Administrator' in register_response.data
+    assert b'System Administrator' not in register_response.data
     assert b'name="email"' in register_response.data
     assert b'type="email" name="email" id="email" required maxlength="254" autocomplete="email"' in register_response.data
     assert admin_response.status_code == 200
@@ -997,6 +997,56 @@ def test_registration_requires_and_persists_valid_email(monkeypatch):
         assert success.status_code == 302
         assert app_module.users_db[username]['email'] == 'updates@example.com'
         assert app_module.get_user_email(username) == 'updates@example.com'
+        assert app_module.verify_password(app_module.users_db[username]['password'], 'password123')
+        assert app_module.users_db[username]['password'] != 'password123'
+
+        login_response = client.post('/login', data={
+            'username': username,
+            'password': 'password123',
+            'role': 'student',
+        })
+        assert login_response.status_code == 302
+        assert login_response.headers['Location'].endswith('/student_dashboard')
+    finally:
+        app_module.users_db.pop(username, None)
+
+
+@pytest.mark.parametrize('role', ['staff', 'admin'])
+def test_public_registration_rejects_privileged_roles(client, role):
+    import app as app_module
+
+    username = '240088880'
+    response = client.post('/register', data={
+        'username': username,
+        'full_name': 'Unprivileged Registration',
+        'password': 'password123',
+        'role': role,
+        'email': 'updates@example.com',
+    }, follow_redirects=True)
+
+    assert b'must be created by an administrator' in response.data
+    assert username not in app_module.users_db
+
+
+def test_login_upgrades_legacy_plaintext_password(client):
+    import app as app_module
+
+    username = '240088879'
+    app_module.users_db[username] = {
+        'password': 'legacy-password',
+        'full_name': 'Legacy Account',
+        'role': 'student',
+        'email': 'legacy@example.com',
+    }
+    try:
+        response = client.post('/login', data={
+            'username': username,
+            'password': 'legacy-password',
+            'role': 'student',
+        })
+        assert response.status_code == 302
+        assert app_module.verify_password(app_module.users_db[username]['password'], 'legacy-password')
+        assert app_module.users_db[username]['password'] != 'legacy-password'
     finally:
         app_module.users_db.pop(username, None)
 
@@ -1171,6 +1221,7 @@ def test_admin_can_manage_users_departments_and_categories():
             'email': 'ava@example.com',
             'role': 'student',
             'department': 'IT Services',
+            'password': 'secure-password-123',
         },
         follow_redirects=True,
     )
@@ -1288,7 +1339,7 @@ def test_password_reset_is_admin_only_and_does_not_require_email(monkeypatch):
         assert response.status_code == 200
         assert b'Password reset' in response.data
         assert b'name="new_password"' in response.data
-        assert users_db[username]['password'] == 'new-password-123'
+        assert __import__('app').verify_password(users_db[username]['password'], 'new-password-123')
     finally:
         users_db.pop(username, None)
 
@@ -1347,7 +1398,7 @@ def test_password_reset_email_uses_saved_email_and_single_use_token(monkeypatch)
         )
         assert reset_response.status_code == 302
         assert reset_response.headers['Location'].endswith('/login')
-        assert users_db[username]['password'] == 'new-password-123'
+        assert __import__('app').verify_password(users_db[username]['password'], 'new-password-123')
         assert client.get(reset_path).headers['Location'].endswith('/forgot_password')
 
         sent_messages.clear()
