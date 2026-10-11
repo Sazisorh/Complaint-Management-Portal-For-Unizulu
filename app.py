@@ -7,7 +7,7 @@ import uuid
 import smtplib
 import ssl
 import time
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from functools import lru_cache
@@ -799,9 +799,11 @@ online_users = {}
 
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_PROVIDER = (os.getenv('EMAIL_PROVIDER') or 'smtp').strip().casefold()
 EMAIL_USERNAME = (os.getenv('EMAIL_USERNAME') or '').strip() or None
 EMAIL_PASSWORD = (os.getenv('EMAIL_PASSWORD') or '').strip() or None
 EMAIL_FROM = os.getenv('EMAIL_FROM', 'no-reply@gmail.com')
+RESEND_API_KEY = (os.getenv('RESEND_API_KEY') or '').strip() or None
 EMAIL_USE_TLS = str(os.getenv('EMAIL_USE_TLS', 'true')).lower() == 'true'
 EMAIL_USE_SSL = str(os.getenv('EMAIL_USE_SSL', 'false')).lower() == 'true'
 EMAIL_TIMEOUT = float(os.getenv('EMAIL_TIMEOUT', '10'))
@@ -841,39 +843,46 @@ def get_outlook_access_token():
 
 def get_email_status():
     missing = []
-    for key, value in {
-        'EMAIL_HOST': EMAIL_HOST,
-        'EMAIL_PORT': EMAIL_PORT,
-        'EMAIL_USERNAME': EMAIL_USERNAME,
-        'EMAIL_FROM': EMAIL_FROM,
-    }.items():
-        if key == 'EMAIL_PORT':
-            continue
-        if not value:
-            missing.append(key)
+    if EMAIL_PROVIDER == 'resend':
+        if not RESEND_API_KEY:
+            missing.append('RESEND_API_KEY')
+        if not EMAIL_FROM:
+            missing.append('EMAIL_FROM')
+    elif EMAIL_PROVIDER == 'smtp':
+        for key, value in {
+            'EMAIL_HOST': EMAIL_HOST,
+            'EMAIL_USERNAME': EMAIL_USERNAME,
+            'EMAIL_FROM': EMAIL_FROM,
+        }.items():
+            if not value:
+                missing.append(key)
 
-    if EMAIL_AUTH_METHOD == 'password' and not EMAIL_PASSWORD:
-        missing.append('EMAIL_PASSWORD')
-    elif EMAIL_AUTH_METHOD == 'oauth2':
-        if not EMAIL_OAUTH_CLIENT_ID:
-            missing.append('EMAIL_OAUTH_CLIENT_ID')
-        if not EMAIL_OAUTH_REFRESH_TOKEN:
-            missing.append('EMAIL_OAUTH_REFRESH_TOKEN')
-        if not EMAIL_OAUTH_TENANT:
-            missing.append('EMAIL_OAUTH_TENANT')
-    elif EMAIL_AUTH_METHOD != 'password':
-        missing.append('EMAIL_AUTH_METHOD')
+        if EMAIL_AUTH_METHOD == 'password' and not EMAIL_PASSWORD:
+            missing.append('EMAIL_PASSWORD')
+        elif EMAIL_AUTH_METHOD == 'oauth2':
+            if not EMAIL_OAUTH_CLIENT_ID:
+                missing.append('EMAIL_OAUTH_CLIENT_ID')
+            if not EMAIL_OAUTH_REFRESH_TOKEN:
+                missing.append('EMAIL_OAUTH_REFRESH_TOKEN')
+            if not EMAIL_OAUTH_TENANT:
+                missing.append('EMAIL_OAUTH_TENANT')
+        elif EMAIL_AUTH_METHOD != 'password':
+            missing.append('EMAIL_AUTH_METHOD')
 
-    if not 1 <= EMAIL_PORT <= 65535:
-        missing.append('EMAIL_PORT')
+        if not 1 <= EMAIL_PORT <= 65535:
+            missing.append('EMAIL_PORT')
+    else:
+        missing.append('EMAIL_PROVIDER')
+
     if EMAIL_TIMEOUT <= 0:
         missing.append('EMAIL_TIMEOUT')
-    if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    if EMAIL_PROVIDER == 'smtp' and EMAIL_USE_TLS and EMAIL_USE_SSL:
         missing.append('EMAIL_TLS_CONFIGURATION')
 
     return {
         'configured': not missing,
         'missing': missing,
+        'provider': EMAIL_PROVIDER,
         'host': EMAIL_HOST,
         'from_address': EMAIL_FROM,
         'use_tls': EMAIL_USE_TLS,
@@ -881,6 +890,36 @@ def get_email_status():
         'timeout': EMAIL_TIMEOUT,
         'auth_method': EMAIL_AUTH_METHOD,
     }
+
+
+def send_resend_email(subject, body, recipients):
+    request = Request(
+        'https://api.resend.com/emails',
+        data=json.dumps({
+            'from': EMAIL_FROM,
+            'to': recipients,
+            'subject': subject,
+            'text': body,
+        }).encode('utf-8'),
+        headers={
+            'Authorization': f'Bearer {RESEND_API_KEY}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+    try:
+        with urlopen(request, timeout=EMAIL_TIMEOUT) as response:
+            status_code = getattr(response, 'status', 200)
+        if not 200 <= status_code < 300:
+            app.logger.error('Resend rejected the email request (HTTP %s).', status_code)
+            return False
+        return True
+    except HTTPError as error:
+        app.logger.error('Resend rejected the email request (HTTP %s).', error.code)
+        return False
+    except (URLError, OSError, ValueError) as error:
+        app.logger.error('Resend email delivery failed (%s).', type(error).__name__)
+        return False
 
 
 def get_user_email(username):
@@ -920,6 +959,9 @@ def send_email_notification(subject, body, recipients):
     if not status['configured']:
         app.logger.error('Email notification skipped; mail configuration is incomplete or invalid: %s', ', '.join(status['missing']))
         return False
+
+    if EMAIL_PROVIDER == 'resend':
+        return send_resend_email(subject, body, recipients)
 
     message = EmailMessage()
     message['Subject'] = subject

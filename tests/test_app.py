@@ -445,6 +445,81 @@ def test_email_notification_rejects_conflicting_tls_modes(monkeypatch):
     assert app_module.send_email_notification('Test subject', 'Test body', ['student@example.test']) is False
 
 
+def test_resend_email_notification_uses_https_api(monkeypatch):
+    import json
+    import app as app_module
+
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    def fake_urlopen(request, timeout):
+        captured['request'] = request
+        captured['timeout'] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'resend')
+    monkeypatch.setattr(app_module, 'RESEND_API_KEY', 'test-resend-key')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'Portal <mail@example.test>')
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 7)
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+
+    assert app_module.send_email_notification(
+        'Test subject',
+        'Test body',
+        ['student@example.test'],
+    ) is True
+    request = captured['request']
+    assert request.full_url == 'https://api.resend.com/emails'
+    assert request.get_header('Authorization') == 'Bearer test-resend-key'
+    assert json.loads(request.data.decode('utf-8')) == {
+        'from': 'Portal <mail@example.test>',
+        'to': ['student@example.test'],
+        'subject': 'Test subject',
+        'text': 'Test body',
+    }
+    assert captured['timeout'] == 7
+
+
+def test_resend_email_notification_reports_api_rejection(monkeypatch, caplog):
+    import app as app_module
+
+    def fake_urlopen(request, timeout):
+        raise app_module.HTTPError(request.full_url, 401, 'Unauthorized', {}, None)
+
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'resend')
+    monkeypatch.setattr(app_module, 'RESEND_API_KEY', 'test-resend-key')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'Portal <mail@example.test>')
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+
+    assert app_module.send_email_notification(
+        'Test subject',
+        'Test body',
+        ['student@example.test'],
+    ) is False
+    assert 'HTTP 401' in caplog.text
+    assert 'test-resend-key' not in caplog.text
+
+
+def test_resend_email_status_requires_api_key(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'resend')
+    monkeypatch.setattr(app_module, 'RESEND_API_KEY', None)
+
+    status = app_module.get_email_status()
+
+    assert status['configured'] is False
+    assert status['missing'] == ['RESEND_API_KEY']
+
+
 def test_email_notification_uses_outlook_oauth2(monkeypatch):
     import app as app_module
 

@@ -45,10 +45,16 @@
 
 ## Optional integrations
 
-- Add the Gmail SMTP settings (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`,
-  `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_USE_TLS=true`, and
-  `EMAIL_USE_SSL=false`) as Railway service variables if email notifications
-  are needed. Use a Gmail app password, not the account password.
+- Railway Trial, Free, and Hobby plans disable outbound SMTP. For these plans,
+  configure Resend's HTTPS API with `EMAIL_PROVIDER=resend`,
+  `RESEND_API_KEY=<Resend API key>`, and `EMAIL_FROM=<verified sender>`.
+  Verify the sender's domain in Resend before sending to students. Keep the API
+  key in Railway's variable manager.
+- On Railway Pro, SMTP can be used instead. Add the Gmail settings
+  (`EMAIL_PROVIDER=smtp`, `EMAIL_HOST=smtp.gmail.com`, `EMAIL_PORT=587`,
+  `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`,
+  `EMAIL_USE_TLS=true`, and `EMAIL_USE_SSL=false`) as Railway service
+  variables. Use a Gmail app password, not the account password.
 - Set `OLLAMA_BASE_URL` to a reachable hosted Ollama-compatible endpoint if
   open-ended chatbot responses should use a model. The default
   `127.0.0.1:11434` only refers to the web-service container; it does not reach
