@@ -1,4 +1,8 @@
 /* Student dashboard and grievance status */
+.student-page,
+.student-page * {
+  box-sizing: border-box;
+}
 body.student-page {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background-color: #f4f6f9;
@@ -104,6 +108,10 @@ body.student-page {
   padding: 10px;
   border: 1px solid #ccc;
   border-radius: 4px;
+}
+.student-page input[type="file"] {
+  width: 100%;
+  max-width: 100%;
 }
 .student-page table {
   width: 100%;
@@ -338,6 +346,11 @@ body.student-page {
 .student-page .section-heading {
   margin-top: 30px;
 }
+.student-page .table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .student-page .inline-form {
   display: inline;
 }
@@ -357,16 +370,30 @@ body.student-page {
     gap: 12px;
     flex-direction: column;
   }
-  .student-page table {
-    display: block;
-    overflow-x: auto;
+  .student-page .table-scroll table {
+    min-width: 820px;
   }
   .student-page .chatbot-panel {
     left: 10px;
     right: 10px;
     width: auto;
+    max-height: calc(100vh - 112px);
+    max-height: calc(100dvh - 112px);
+  }
+  .student-page .chatbot-body {
+    max-height: min(260px, calc(100vh - 300px));
+    max-height: min(260px, calc(100dvh - 300px));
   }
   .student-page .chatbot-input-wrap {
     flex-wrap: wrap;
+  }
+  .student-page .chatbot-input {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .student-page .chatbot-upload,
+  .student-page .chatbot-send,
+  .student-page .btn {
+    min-height: 44px;
   }
 }

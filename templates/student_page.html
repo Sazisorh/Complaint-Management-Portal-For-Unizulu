@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/student_dashboard.css') }}">
+    <title>Student Page</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/student_page.css') }}">
 </head>
 <body class="student-page">
     <header>
@@ -69,54 +69,56 @@
 
         <!-- Show prior submissions and allow eligible grievances to be withdrawn. -->
         <h3 class="section-heading">My Submitted Grievances</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Reference Number</th>
-                    <th>Category</th>
-                    <th>Description</th>
-                    <th>Submitted As</th>
-                    <th>Evidence</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in complaints %}
-                <tr>
-                    <td>#{{ item.id }}</td>
-                    <td>{{ item.reference_number }}</td>
-                    <td>{{ item.category }}</td>
-                    <td>{{ item.description }}</td>
-                    <td>{{ 'Anonymous' if item.is_anonymous else item.full_name }}</td>
-                    <td>
-                        {% if item.evidence_path %}
-                            <a href="{{ get_evidence_preview_url(item.evidence_path) }}" target="_blank" rel="noopener noreferrer">View</a>
-                        {% else %}
-                            None
-                        {% endif %}
-                    </td>
-                    <td><span class="badge badge-{{ item.status.replace(' ', '-') }}">{{ item.status }}</span></td>
-                    <td>{{ item.created_at }}</td>
-                    <td>
-                        {% if item.status not in ['Resolved', 'Rejected', 'Withdrawn'] %}
-                        <form action="{{ url_for('withdraw_grievance', complaint_id=item.id) }}" method="POST" class="withdraw-form">
-                            <button type="submit" class="btn btn-danger">Withdraw</button>
-                        </form>
-                        {% else %}
-                        —
-                        {% endif %}
-                    </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="9" class="text-center">No grievances submitted yet.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Reference Number</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Submitted As</th>
+                        <th>Evidence</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in complaints %}
+                    <tr>
+                        <td>#{{ item.id }}</td>
+                        <td>{{ item.reference_number }}</td>
+                        <td>{{ item.category }}</td>
+                        <td>{{ item.description }}</td>
+                        <td>{{ 'Anonymous' if item.is_anonymous else item.full_name }}</td>
+                        <td>
+                            {% if item.evidence_path %}
+                                <a href="{{ get_evidence_preview_url(item.evidence_path) }}" target="_blank" rel="noopener noreferrer">View</a>
+                            {% else %}
+                                None
+                            {% endif %}
+                        </td>
+                        <td><span class="badge badge-{{ item.status.replace(' ', '-') }}">{{ item.status }}</span></td>
+                        <td>{{ item.created_at }}</td>
+                        <td>
+                            {% if item.status not in ['Resolved', 'Rejected', 'Withdrawn'] %}
+                            <form action="{{ url_for('withdraw_grievance', complaint_id=item.id) }}" method="POST" class="withdraw-form">
+                                <button type="submit" class="btn btn-danger">Withdraw</button>
+                            </form>
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center">No grievances submitted yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Expose the latest reference to the assistant without displaying it twice. -->
@@ -143,6 +145,6 @@
         <div id="chatbot-evidence-label" class="chatbot-evidence-label">No evidence selected</div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/student_dashboard.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/student_page.js') }}" defer></script>
 </body>
 </html>

@@ -68,6 +68,7 @@ def evidence_database(monkeypatch):
 
     rows = {}
     monkeypatch.setattr(app_module, 'get_database_connection', lambda: FakeEvidenceConnection(rows))
+    monkeypatch.setattr(app_module, 'mysql_storage_enabled', lambda: False)
     return rows
 
 
@@ -123,6 +124,147 @@ def test_application_defaults_do_not_seed_demo_accounts_or_complaints():
 
     assert DEFAULT_USERS_DB == {}
     assert DEFAULT_COMPLAINTS_DB == []
+
+
+def test_mysql_state_persistence_writes_users_and_complaints(monkeypatch):
+    import app as app_module
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, query, params=None):
+            self.statements.append((query, params))
+
+        def fetchall(self):
+            return [{'id': 7, 'username': '201234567'}]
+
+        def close(self):
+            pass
+
+    class Connection:
+        def __init__(self):
+            self.database_cursor = Cursor()
+            self.committed = False
+
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return self.database_cursor
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            raise AssertionError('The successful database write should not roll back.')
+
+        def close(self):
+            pass
+
+    connection = Connection()
+    monkeypatch.setattr(app_module, 'get_database_connection', lambda: connection)
+    app_module.persist_mysql_state(
+        {
+            '201234567': {
+                'full_name': 'Test Student',
+                'email': 'student@example.test',
+                'password': 'hashed-password',
+                'role': 'student',
+                'department': 'Academic Affairs',
+            }
+        },
+        [
+            {
+                'id': 12,
+                'username': '201234567',
+                'full_name': 'Test Student',
+                'description': 'The residence WiFi is unavailable.',
+                'category': 'ICT',
+                'status': 'Pending',
+                'created_at': '2026-10-11',
+                'reference_number': 'GRV-20261011-0012',
+                'is_anonymous': False,
+            }
+        ],
+    )
+
+    statements = connection.database_cursor.statements
+    user_insert = next(item for item in statements if item[0].startswith('INSERT INTO users'))
+    complaint_insert = next(item for item in statements if item[0].startswith('INSERT INTO complaints'))
+    assert user_insert[1][0:5] == (
+        '201234567',
+        'Test Student',
+        'student@example.test',
+        'hashed-password',
+        'student',
+    )
+    assert complaint_insert[1][0:7] == (
+        12,
+        7,
+        '201234567',
+        'Test Student',
+        'ICT',
+        'The residence WiFi is unavailable.',
+        'ICT',
+    )
+    assert connection.committed is True
+
+
+def test_mysql_state_loads_users_and_complaints(monkeypatch):
+    import app as app_module
+
+    class Cursor:
+        def __init__(self):
+            self.result = []
+
+        def execute(self, query):
+            if query.startswith('SELECT username'):
+                self.result = [{
+                    'username': '201234567',
+                    'full_name': 'Test Student',
+                    'email': 'student@example.test',
+                    'password': 'hashed-password',
+                    'role': 'student',
+                    'department': 'IT Services',
+                    'password_reset_token_version': None,
+                }]
+            else:
+                self.result = [{
+                    'id': 12,
+                    'username': '201234567',
+                    'full_name': 'Test Student',
+                    'description': 'The residence WiFi is unavailable.',
+                    'category': 'ICT',
+                    'department': 'IT Services',
+                    'status': 'Pending',
+                    'created_at': '2026-10-11',
+                    'reference_number': 'GRV-20261011-0012',
+                    'is_anonymous': 0,
+                    'evidence_path': 'database/evidence.pdf',
+                }]
+
+        def fetchall(self):
+            return self.result
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_module, 'get_database_connection', Connection)
+    users, complaints = app_module.load_mysql_state()
+
+    assert users['201234567']['full_name'] == 'Test Student'
+    assert users['201234567']['department'] == 'IT Services'
+    assert complaints[0]['username'] == '201234567'
+    assert complaints[0]['category'] == 'ICT'
+    assert complaints[0]['reference_number'] == 'GRV-20261011-0012'
+    assert complaints[0]['evidence_path'] == 'database/evidence.pdf'
 
 
 def test_home_page_route_exists():
@@ -518,6 +660,27 @@ def test_complaint_notification_tracks_student_confirmation_separately(monkeypat
     }) is False
 
 
+def test_complaint_notifications_report_student_and_staff_delivery_separately(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        'send_email_notification',
+        lambda subject, _body, _recipients: subject.startswith('New grievance submitted:'),
+    )
+
+    result = app_module.send_complaint_notifications({
+        'username': 'student1',
+        'full_name': 'Test Student',
+        'reference_number': 'GRV-TEST-1234',
+        'category': 'ICT',
+        'status': 'Pending',
+        'description': 'Test notification delivery.',
+    })
+
+    assert result == {'student': False, 'staff': True}
+
+
 def test_chatbot_submission_returns_actionable_json_when_evidence_is_missing(client):
     response = client.post(
         '/submit_grievance',
@@ -567,17 +730,18 @@ def test_chatbot_submission_confirms_saved_grievance_when_email_fails(client, mo
     assert response.status_code == 201
     assert response.get_json()['reference_number'].startswith('GRV-')
     assert response.get_json()['email_sent'] is False
+    assert response.get_json()['staff_email_sent'] is False
 
 
 def test_student_dashboard_bot_prompts_for_reference_and_evidence(client):
     response = client.get('/student_dashboard')
-    script_response = client.get('/static/js/student_dashboard.js')
+    script_response = client.get('/static/js/student_page.js')
 
     assert response.status_code == 200
     assert script_response.status_code == 200
     html = response.get_data(as_text=True)
     script = script_response.get_data(as_text=True)
-    assert 'js/student_dashboard.js' in html
+    assert 'js/student_page.js' in html
     assert '/chatbot/chat' in script
     assert '/complaint_status' in script
     assert '/submit_grievance' in script
@@ -585,6 +749,9 @@ def test_student_dashboard_bot_prompts_for_reference_and_evidence(client):
     assert 'const asksForStatus' in script
     assert script.index('const asksForStatus') < script.index("chatState.mode === 'submit-anonymous'")
     assert "chatState.mode === 'submit-evidence' && /^(continue|ready|i am ready|done|next|proceed)$/i.test(value)" in script
+    assert 'A confirmation email has been sent to your registered email address.' in script
+    assert 'Both messages were accepted' not in script
+    assert 'staff/admin notification could not be sent' not in script
     assert 'I paused your previous grievance draft' in script
     assert 'resumePausedDraft()' in script
     assert 'choose a category' not in script
@@ -850,12 +1017,12 @@ def test_student_dashboard_has_track_status_button_and_pane(client):
     assert status_page.status_code == 200
     status_html = status_page.get_data(as_text=True)
     assert 'Check Status' in status_html
-    assert 'Back to Dashboard' in status_html
+    assert 'Back to Student Page' in status_html
 
 
 def test_student_dashboard_chatbot_asks_about_anonymous_submission(client):
     response = client.get('/student_dashboard')
-    script_response = client.get('/static/js/student_dashboard.js')
+    script_response = client.get('/static/js/student_page.js')
 
     assert response.status_code == 200
     assert script_response.status_code == 200
@@ -863,8 +1030,50 @@ def test_student_dashboard_chatbot_asks_about_anonymous_submission(client):
     assert 'Would you like to submit this grievance anonymously? Reply Yes or No.' in script
 
 
+def test_student_and_staff_pages_load_renamed_assets(client):
+    student_response = client.get('/student_dashboard')
+    student_html = student_response.get_data(as_text=True)
+
+    assert student_response.status_code == 200
+    assert '/static/css/student_page.css' in student_html
+    assert '/static/js/student_page.js' in student_html
+    student_css = client.get('/static/css/student_page.css')
+    student_js = client.get('/static/js/student_page.js')
+    legacy_student_css = client.get('/static/css/student_dashboard.css')
+    legacy_student_js = client.get('/static/js/student_dashboard.js')
+    assert student_css.status_code == 200
+    assert student_css.mimetype == 'text/css'
+    assert student_js.status_code == 200
+    assert student_js.mimetype == 'application/javascript'
+    assert legacy_student_css.status_code == 200
+    assert legacy_student_css.mimetype == 'text/css'
+    assert legacy_student_css.data == student_css.data
+    assert legacy_student_js.status_code == 200
+    assert legacy_student_js.mimetype == 'application/javascript'
+    assert legacy_student_js.data == student_js.data
+
+    staff_client = app.test_client()
+    with staff_client.session_transaction() as session:
+        session['username'] = 'staff1'
+        session['full_name'] = 'Test Staff'
+        session['role'] = 'staff'
+        session['department'] = 'Academic Affairs'
+
+    staff_response = staff_client.get('/staff_dashboard')
+    staff_html = staff_response.get_data(as_text=True)
+    assert staff_response.status_code == 200
+    assert '/static/css/staff_page.css' in staff_html
+    staff_css = staff_client.get('/static/css/staff_page.css')
+    legacy_staff_css = staff_client.get('/static/css/staff_dashboard.css')
+    assert staff_css.status_code == 200
+    assert staff_css.mimetype == 'text/css'
+    assert legacy_staff_css.status_code == 200
+    assert legacy_staff_css.mimetype == 'text/css'
+    assert legacy_staff_css.data == staff_css.data
+
+
 def test_student_dashboard_ai_assistant_is_anchored_away_from_withdraw_buttons(client):
-    response = client.get('/static/css/student_dashboard.css')
+    response = client.get('/static/css/student_page.css')
 
     assert response.status_code == 200
     stylesheet = response.get_data(as_text=True)
@@ -952,7 +1161,8 @@ def test_admin_options_are_available_in_login_and_register():
     assert login_response.status_code == 200
     assert b'Administrator' in login_response.data
     assert register_response.status_code == 200
-    assert b'Administrator' in register_response.data
+    assert b'System Administrator' in register_response.data
+    assert b'Staff Member' in register_response.data
     assert b'name="email"' in register_response.data
     assert b'type="email" name="email" id="email" required maxlength="254" autocomplete="email"' in register_response.data
     assert admin_response.status_code == 200
@@ -962,7 +1172,7 @@ def test_admin_options_are_available_in_login_and_register():
 def test_registration_requires_and_persists_valid_email(monkeypatch):
     import app as app_module
 
-    username = '240088881'
+    username = '200088881'
     monkeypatch.setitem(app_module.app.config, 'TESTING', True)
     app_module.users_db.pop(username, None)
     client = app.test_client()
@@ -997,41 +1207,231 @@ def test_registration_requires_and_persists_valid_email(monkeypatch):
         assert success.status_code == 302
         assert app_module.users_db[username]['email'] == 'updates@example.com'
         assert app_module.get_user_email(username) == 'updates@example.com'
+        assert app_module.verify_password(app_module.users_db[username]['password'], 'password123')
+        assert app_module.users_db[username]['password'] != 'password123'
+
+        login_response = client.post('/login', data={
+            'username': username,
+            'password': 'password123',
+            'role': 'student',
+        })
+        assert login_response.status_code == 302
+        assert login_response.headers['Location'].endswith('/student_dashboard')
+    finally:
+        app_module.users_db.pop(username, None)
+
+
+@pytest.mark.parametrize(
+    ('role', 'username', 'department'),
+    [('staff', '300088880', 'Academic Affairs'), ('admin', '500088880', '')],
+)
+def test_public_registration_allows_staff_and_admin_accounts(client, role, username, department):
+    import app as app_module
+
+    original = app_module.users_db.get(username)
+    try:
+        response = client.post('/register', data={
+            'username': username,
+            'full_name': 'New Account',
+            'password': 'password123',
+            'role': role,
+            'email': f'{role}@example.com',
+            'department': department,
+        })
+
+        assert response.status_code == 302
+        assert username in app_module.users_db
+        assert app_module.users_db[username]['role'] == role
+        assert app_module.users_db[username]['department'] == department or role == 'admin'
+    finally:
+        if original is None:
+            app_module.users_db.pop(username, None)
+        else:
+            app_module.users_db[username] = original
+
+
+def test_student_registration_requires_nine_digit_id_starting_with_20(client):
+    import app as app_module
+
+    username = '240088880'
+    response = client.post('/register', data={
+        'username': username,
+        'full_name': 'Invalid Student ID',
+        'password': 'password123',
+        'role': 'student',
+        'email': 'invalid-id@example.com',
+    }, follow_redirects=True)
+
+    assert b'Student number must be exactly 9 digits and start with 20.' in response.data
+    assert username not in app_module.users_db
+
+
+def test_login_enforces_role_specific_id_prefixes():
+    client = app.test_client()
+    for role, username, prefix in [
+        ('student', '300000001', '20'),
+        ('staff', '200000001', '30'),
+        ('admin', '200000001', '50'),
+    ]:
+        response = client.post('/login', data={
+            'username': username,
+            'password': 'password123',
+            'role': role,
+            'department': 'Academic Affairs',
+        }, follow_redirects=True)
+        assert f'start with {prefix}'.encode() in response.data
+
+
+def test_admin_user_creation_enforces_role_ids_and_account_caps():
+    import app as app_module
+
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session['username'] = 'admin-session'
+        session['full_name'] = 'Test Administrator'
+        session['role'] = 'admin'
+
+    staff_ids = [f'30{index:07d}' for index in range(50)]
+    admin_ids = [f'50{index:07d}' for index in range(3)]
+    added_ids = staff_ids + admin_ids
+    previous_users = {username: app_module.users_db.get(username) for username in added_ids}
+    for index, username in enumerate(staff_ids):
+        app_module.users_db[username] = {'role': 'staff', 'full_name': f'Staff {index}'}
+    for index, username in enumerate(admin_ids):
+        app_module.users_db[username] = {'role': 'admin', 'full_name': f'Admin {index}'}
+
+    def add_user(username, role):
+        return client.post('/administrator/add_user', data={
+            'username': username,
+            'full_name': 'New User',
+            'email': 'new-user@example.com',
+            'role': role,
+            'department': 'Academic Affairs',
+            'password': 'password123',
+        }, follow_redirects=True)
+
+    try:
+        invalid_staff_id_response = add_user('200000099', 'staff')
+        staff_limit_response = add_user('309999999', 'staff')
+        admin_limit_response = add_user('509999999', 'admin')
+        public_staff_limit_response = client.post('/register', data={
+            'username': '309999998',
+            'full_name': 'Over-limit Staff',
+            'password': 'password123',
+            'role': 'staff',
+            'email': 'over-limit-staff@example.com',
+            'department': 'Academic Affairs',
+        }, follow_redirects=True)
+        public_admin_limit_response = client.post('/register', data={
+            'username': '509999998',
+            'full_name': 'Over-limit Administrator',
+            'password': 'password123',
+            'role': 'admin',
+            'email': 'over-limit-admin@example.com',
+        }, follow_redirects=True)
+
+        assert b'start with 30' in invalid_staff_id_response.data
+        assert b'No more than 50 staff accounts' in staff_limit_response.data
+        assert b'No more than 3 administrator accounts' in admin_limit_response.data
+        assert b'No more than 50 staff accounts' in public_staff_limit_response.data
+        assert b'No more than 3 administrator accounts' in public_admin_limit_response.data
+        assert '309999999' not in app_module.users_db
+        assert '509999999' not in app_module.users_db
+    finally:
+        for username, previous_user in previous_users.items():
+            if previous_user is None:
+                app_module.users_db.pop(username, None)
+            else:
+                app_module.users_db[username] = previous_user
+
+
+def test_login_upgrades_legacy_plaintext_password(client):
+    import app as app_module
+
+    username = '200088879'
+    app_module.users_db[username] = {
+        'password': 'legacy-password',
+        'full_name': 'Legacy Account',
+        'role': 'student',
+        'email': 'legacy@example.com',
+    }
+    try:
+        response = client.post('/login', data={
+            'username': username,
+            'password': 'legacy-password',
+            'role': 'student',
+        })
+        assert response.status_code == 302
+        assert app_module.verify_password(app_module.users_db[username]['password'], 'legacy-password')
+        assert app_module.users_db[username]['password'] != 'legacy-password'
     finally:
         app_module.users_db.pop(username, None)
 
 
 def test_admin_login_redirects_to_administrator_dashboard():
-    client = app.test_client()
-    response = client.post(
-        '/login',
-        data={'username': 'admin1', 'password': '123', 'role': 'admin'},
-        follow_redirects=True,
-    )
+    import app as app_module
 
-    assert response.status_code == 200
-    assert b'System Administration Control Panel' in response.data
+    username = '500000001'
+    app_module.users_db[username] = {
+        'password': app_module.hash_password('123'),
+        'full_name': 'System Administrator',
+        'role': 'admin',
+    }
+    client = app.test_client()
+    try:
+        response = client.post(
+            '/login',
+            data={'username': username, 'password': '123', 'role': 'admin'},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        assert b'System Administration Control Panel' in response.data
+    finally:
+        app_module.users_db.pop(username, None)
 
 
 def test_login_page_includes_departments_and_role_specific_validation(client):
     response = client.get('/login')
     script_response = client.get('/static/js/login.js')
+    password_script_response = client.get('/static/js/password_toggle.js')
+    auth_stylesheet_response = client.get('/static/css/auth.css')
 
     assert response.status_code == 200
     assert script_response.status_code == 200
+    assert password_script_response.status_code == 200
+    assert auth_stylesheet_response.status_code == 200
     html = response.get_data(as_text=True)
     script = script_response.get_data(as_text=True)
+    password_script = password_script_response.get_data(as_text=True)
+    auth_stylesheet = auth_stylesheet_response.get_data(as_text=True)
     assert 'id="department-group"' in html
     assert 'value="Academic Affairs"' in html
     assert 'value="IT Services"' in html
     assert 'departmentSelect.required = isStaff' in script
-    assert "usernameInput.pattern = '[0-9]{9}'" in script
+    assert "student: '20', staff: '30', admin: '50'" in script
+    assert "usernameInput.pattern = `${prefix}[0-9]{7}`" in script
     assert "usernameInput.removeAttribute('pattern')" in script
+    assert 'password_toggle.js' in html
+    assert "input.type = reveal ? 'text' : 'password'" in password_script
+    assert "input.parentElement.classList.contains('password-field')" in password_script
+    assert 'transform: translateY(-50%)' in auth_stylesheet
+    assert '::-ms-reveal' in auth_stylesheet
 
 
 def test_staff_login_requires_department_and_filters_complaints():
+    import app as app_module
+
     client = app.test_client()
-    complaints_db = __import__('app').complaints_db
+    complaints_db = app_module.complaints_db
+    username = '300000001'
+    previous_user = app_module.users_db.get(username)
+    app_module.users_db[username] = {
+        'password': app_module.hash_password('123'),
+        'full_name': 'Test Staff',
+        'role': 'staff',
+        'department': 'Academic Affairs',
+    }
     complaints_db[:] = [
         {
             'id': 9998,
@@ -1064,7 +1464,7 @@ def test_staff_login_requires_department_and_filters_complaints():
     try:
         response = client.post(
             '/login',
-            data={'username': 'staff1', 'password': '123', 'role': 'staff', 'department': 'Academic Affairs'},
+            data={'username': username, 'password': '123', 'role': 'staff', 'department': 'Academic Affairs'},
             follow_redirects=True,
         )
         assert response.status_code == 200
@@ -1073,6 +1473,10 @@ def test_staff_login_requires_department_and_filters_complaints():
         assert 'IT issue not for academic staff' not in html
     finally:
         complaints_db[:] = [entry for entry in complaints_db if entry.get('id') not in {9998, 9999}]
+        if previous_user is None:
+            app_module.users_db.pop(username, None)
+        else:
+            app_module.users_db[username] = previous_user
 
 
 def test_staff_dashboard_routes_legacy_general_complaints_to_academic_affairs():
@@ -1166,17 +1570,30 @@ def test_admin_can_manage_users_departments_and_categories():
     add_user_response = client.post(
         '/administrator/add_user',
         data={
-            'username': 'admin_student',
+            'username': '200000001',
             'full_name': 'Ava Smith',
+            'email': 'ava@example.com',
+            'role': 'student',
+            'department': 'IT Services',
+            'password': 'valid-test-password',
+        },
+        follow_redirects=True,
+    )
+    assert add_user_response.status_code == 200
+    assert b'AVA SMITH' in add_user_response.data or b'Ava Smith' in add_user_response.data
+    assert __import__('app').users_db['200000001']['email'] == 'ava@example.com'
+    update_user_response = client.post(
+        '/administrator/update_user_role/200000001',
+        data={
+            'full_name': 'Ava Johnson',
             'email': 'ava@example.com',
             'role': 'student',
             'department': 'IT Services',
         },
         follow_redirects=True,
     )
-    assert add_user_response.status_code == 200
-    assert b'AVA SMITH' in add_user_response.data or b'Ava Smith' in add_user_response.data
-    assert __import__('app').users_db['admin_student']['email'] == 'ava@example.com'
+    assert update_user_response.status_code == 200
+    assert __import__('app').users_db['200000001']['full_name'] == 'Ava Johnson'
 
     dept_response = client.post('/administrator/add_department', data={'department': 'Psychology'}, follow_redirects=True)
     assert dept_response.status_code == 200
@@ -1186,7 +1603,7 @@ def test_admin_can_manage_users_departments_and_categories():
     assert category_response.status_code == 200
     assert b'Admissions' in category_response.data
 
-    remove_user_response = client.post('/administrator/remove_user/admin_student', follow_redirects=True)
+    remove_user_response = client.post('/administrator/remove_user/200000001', follow_redirects=True)
     assert remove_user_response.status_code == 200
     assert b'removed' in remove_user_response.data.lower()
 
@@ -1220,6 +1637,7 @@ def test_admin_can_add_missing_email_to_existing_user(monkeypatch):
             f'/administrator/update_user_role/{username}',
             data={
                 'email': 'legacy-updates@example.com',
+                'full_name': 'Legacy User',
                 'role': 'student',
                 'department': 'Academic Affairs',
             },
@@ -1233,6 +1651,7 @@ def test_admin_can_add_missing_email_to_existing_user(monkeypatch):
 
 
 def test_password_reset_is_admin_only_and_does_not_require_email(monkeypatch):
+    import app as app_module
     from app import users_db
 
     monkeypatch.setitem(app.config, 'TESTING', True)
@@ -1288,7 +1707,7 @@ def test_password_reset_is_admin_only_and_does_not_require_email(monkeypatch):
         assert response.status_code == 200
         assert b'Password reset' in response.data
         assert b'name="new_password"' in response.data
-        assert users_db[username]['password'] == 'new-password-123'
+        assert app_module.verify_password(users_db[username]['password'], 'new-password-123')
     finally:
         users_db.pop(username, None)
 
@@ -1304,6 +1723,7 @@ def test_forgot_password_page_explains_saved_email_delivery():
 
 
 def test_password_reset_email_uses_saved_email_and_single_use_token(monkeypatch):
+    import app as app_module
     from app import users_db
 
     monkeypatch.setitem(app.config, 'TESTING', True)
@@ -1347,7 +1767,7 @@ def test_password_reset_email_uses_saved_email_and_single_use_token(monkeypatch)
         )
         assert reset_response.status_code == 302
         assert reset_response.headers['Location'].endswith('/login')
-        assert users_db[username]['password'] == 'new-password-123'
+        assert app_module.verify_password(users_db[username]['password'], 'new-password-123')
         assert client.get(reset_path).headers['Location'].endswith('/forgot_password')
 
         sent_messages.clear()
@@ -1365,7 +1785,7 @@ def test_password_reset_email_uses_saved_email_and_single_use_token(monkeypatch)
 def test_password_reset_does_not_send_when_no_saved_email(client, monkeypatch):
     import app as app_module
 
-    username = '240088882'
+    username = '200088882'
     app_module.users_db[username] = {
         'password': 'old-password',
         'full_name': 'No Email User',
@@ -1564,6 +1984,7 @@ def test_submission_confirmation_email_contains_reference_number(monkeypatch, tm
     import app as app_module
 
     monkeypatch.setattr(app_module, 'UPLOAD_FOLDER', str(tmp_path))
+    monkeypatch.setitem(app_module.users_db['student1'], 'email', 'registered.student@example.test')
     original_complaints = list(app_module.complaints_db)
     original_evidence_files = list(app_module.evidence_files)
     sent = {}
@@ -1596,7 +2017,7 @@ def test_submission_confirmation_email_contains_reference_number(monkeypatch, tm
         assert response.status_code == 200
         assert 'subject' in sent
         assert 'Confirmation' in sent['subject']
-        assert 'test.student@unizulu.ac.za' in sent['recipients']
+        assert sent['recipients'] == ['registered.student@example.test']
         assert 'Reference Number' in sent['body']
         assert 'GRV-' in sent['body']
     finally:

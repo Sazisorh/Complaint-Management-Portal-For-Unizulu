@@ -37,26 +37,28 @@
         <div class="card">
             <h3>Online Users</h3>
             {% if online_users_list %}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Username</th>
-                            <th>Role</th>
-                            <th>Last Seen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for user in online_users_list %}
-                        <tr>
-                            <td>{{ user.full_name }}</td>
-                            <td>{{ user.username }}</td>
-                            <td><span class="badge badge-{{ user.role }}">{{ user.role|title }}</span></td>
-                            <td>{{ user.last_seen }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in online_users_list %}
+                            <tr>
+                                <td>{{ user.full_name }}</td>
+                                <td>{{ user.username }}</td>
+                                <td><span class="badge badge-{{ user.role }}">{{ user.role|title }}</span></td>
+                                <td>{{ user.last_seen }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             {% else %}
                 <p>No users are currently online.</p>
             {% endif %}
@@ -85,26 +87,28 @@
                 </div>
             </div>
 
-            <table>
-                <thead>
-                    <tr>
-                        <th>Category</th>
-                        <th>Count</th>
-                        <th>Percentage</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for category, count in analytics.category_counts.items() %}
-                    <tr>
-                        <td>{{ category }}</td>
-                        <td>{{ count }}</td>
-                        <td>{{ analytics.category_percentages.get(category, 0) }}%</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="3">No complaints uploaded yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Count</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category, count in analytics.category_counts.items() %}
+                        <tr>
+                            <td>{{ category }}</td>
+                            <td>{{ count }}</td>
+                            <td>{{ analytics.category_percentages.get(category, 0) }}%</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3">No complaints uploaded yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Provide account management alongside department and category settings. -->
@@ -112,6 +116,7 @@
             <div class="card">
                 <h3>Manage User Accounts</h3>
 
+                <p>Student IDs start with 20, staff IDs with 30, and administrator IDs with 50; all IDs must contain 9 digits. A maximum of 50 staff and 3 administrators may be registered.</p>
                 <form action="{{ url_for('add_user') }}" method="POST">
                     <div class="form-row">
                         <div class="field-group">
@@ -119,8 +124,8 @@
                             <input type="text" name="full_name" placeholder="Ava Smith" required>
                         </div>
                         <div class="field-group">
-                            <label>Username</label>
-                            <input type="text" name="username" placeholder="ava123" required>
+                            <label for="new-user-username">9-digit ID</label>
+                            <input id="new-user-username" type="text" name="username" placeholder="20XXXXXXX" pattern="20[0-9]{7}" maxlength="9" inputmode="numeric" title="The ID prefix must match the selected role." required>
                         </div>
                         <div class="field-group">
                             <label>Email for updates</label>
@@ -128,7 +133,7 @@
                         </div>
                         <div class="field-group">
                             <label>Role</label>
-                            <select name="role">
+                            <select id="new-user-role" name="role">
                                 {% for role in roles %}
                                 <option value="{{ role }}">{{ role|title }}</option>
                                 {% endfor %}
@@ -145,8 +150,8 @@
                             </select>
                         </div>
                         <div class="field-group">
-                            <label>Password</label>
-                            <input type="password" name="password" value="123" required>
+                            <label for="new-user-password">Password</label>
+                            <input id="new-user-password" type="password" name="password" minlength="8" autocomplete="new-password" required>
                         </div>
                         <div class="field-group field-end">
                             <button type="submit" class="small-btn">Add User</button>
@@ -154,23 +159,26 @@
                     </div>
                 </form>
 
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Username</th>
-                            <th>Full Name</th>
-                            <th>Email</th>
-                            <th>Role</th>
-                            <th>Department</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for user in users_list|default([]) %}
-                        <tr>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Full Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Department</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in users_list|default([]) %}
+                            <tr>
                             <td>{{ user.username }}</td>
                             <td>{{ user.full_name|upper }}</td>
                             <td>
                                 <form id="update-user-{{ loop.index }}" action="{{ url_for('update_user_role', username=user.username) }}" method="POST">
+                                    <label for="user-full-name-{{ loop.index }}">Full name</label>
+                                    <input id="user-full-name-{{ loop.index }}" type="text" name="full_name" value="{{ user.full_name }}" required>
                                     <label for="user-email-{{ loop.index }}">Email for updates</label>
                                     <input id="user-email-{{ loop.index }}" type="email" name="email" value="{{ user.email }}" maxlength="254" required>
                                 </form>
@@ -199,12 +207,13 @@
                                     <button type="submit" class="small-btn mt-8">Reset Password</button>
                                 </form>
                             </td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="5">No users registered yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="5">No users registered yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <div class="card">
@@ -259,6 +268,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/password_toggle.js') }}" defer></script>
 
 </body>
 </html>

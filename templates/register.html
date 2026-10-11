@@ -18,15 +18,14 @@
           {% endif %}
         {% endwith %}
 
-        <!-- Collect the identity and credentials needed to create an account. -->
         <form action="{{ url_for('register') }}" method="POST">
             <div class="form-group">
                 <label>Full Name and Surname</label>
                 <input type="text" name="full_name" required placeholder="Enter your name and surname">
             </div>
             <div class="form-group">
-                <label>Staff / Student ID</label>
-                <input type="text" name="username" required placeholder="Enter your nine digits staff/student ID" pattern="[0-9]{9}" title="Student or staff ID must be exactly 9 digits."
+                <label for="register-username">9-digit ID</label>
+                <input id="register-username" type="text" name="username" required placeholder="Enter your 9-digit ID starting with 20" pattern="20[0-9]{7}" maxlength="9" title="ID must match the selected role and contain exactly 9 digits."
                     inputmode="numeric">
             </div>
             <div class="form-group">
@@ -34,12 +33,21 @@
                 <input type="email" name="email" id="email" required maxlength="254" autocomplete="email" placeholder="you@example.com">
             </div>
             <div class="form-group">
-                <label>Account Type</label>
-                <select name="role" required>
+                <label for="register-role">Account Type</label>
+                <select id="register-role" name="role" required>
                     <option value="" selected disabled>Select Role</option>
                     <option value="student">Student</option>
-                    <option value="staff">Staff</option>
+                    <option value="staff">Staff Member</option>
                     <option value="admin">System Administrator</option>
+                </select>
+            </div>
+            <div class="form-group is-hidden" id="register-department-group">
+                <label for="register-department">Department</label>
+                <select id="register-department" name="department">
+                    <option value="" selected disabled>Select Department</option>
+                    {% for department in departments %}
+                    <option value="{{ department }}">{{ department }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div class="form-group">
@@ -48,6 +56,8 @@
             </div>
             <button type="submit" class="btn">Register</button>
         </form>
+        <script src="{{ url_for('static', filename='js/register.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/password_toggle.js') }}" defer></script>
         <div class="links">
             <a href="{{ url_for('login') }}">Back to Login</a>
         </div>

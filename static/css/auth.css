@@ -15,7 +15,7 @@ body.auth-page {
 body.auth-page.auth-login,
 body.auth-page.auth-register,
 body.auth-page.auth-forgot {
-  height: 100vh;
+  min-height: 100vh;
 }
 .auth-page .card {
   background: white;
@@ -68,6 +68,44 @@ body.auth-page.auth-forgot {
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 14px;
+}
+.auth-page input[type="password"]::-ms-reveal,
+.auth-page input[type="password"]::-ms-clear {
+  display: none;
+}
+.auth-page .password-field {
+  position: relative;
+}
+.auth-page .password-field input {
+  padding-right: 44px;
+}
+.auth-page .password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #003366;
+  cursor: pointer;
+}
+.auth-page .password-toggle:focus-visible {
+  outline: 2px solid #0057b8;
+  outline-offset: 2px;
+}
+.auth-page .password-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 .auth-page .btn {
   width: 100%;
@@ -126,4 +164,18 @@ body.auth-page.auth-forgot {
 }
 .auth-page .is-hidden {
   display: none;
+}
+@media (max-width: 480px) {
+  body.auth-page {
+    align-items: flex-start;
+    padding: 14px;
+  }
+  .auth-page .card {
+    padding: 22px 18px;
+  }
+  .auth-page input,
+  .auth-page select,
+  .auth-page .btn {
+    min-height: 44px;
+  }
 }

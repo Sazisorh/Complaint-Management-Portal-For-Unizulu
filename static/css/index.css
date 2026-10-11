@@ -248,6 +248,7 @@ body.index-page {
   background: white;
   border-radius: 18px;
   padding: 30px 28px;
+  min-width: 0;
   box-shadow: 0 12px 28px rgba(17, 26, 39, 0.08);
   border: 1px solid rgba(0, 51, 102, 0.06);
 }
@@ -262,6 +263,9 @@ body.index-page {
   color: #53657a;
   line-height: 1.7;
   font-size: 1rem;
+}
+.contact-details strong {
+  overflow-wrap: anywhere;
 }
 .contact-list {
   list-style: none;
@@ -302,5 +306,61 @@ body.index-page {
   }
   .topbar {
     padding: 0 18px;
+  }
+}
+@media (max-width: 600px) {
+  .topbar {
+    height: auto;
+    min-height: 76px;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 16px;
+  }
+  .nav {
+    order: 3;
+    display: flex;
+    flex-basis: 100%;
+    gap: 20px;
+    overflow-x: auto;
+    padding: 4px 0;
+    white-space: nowrap;
+  }
+  .nav a {
+    font-size: 0.9rem;
+  }
+  .login-btn {
+    padding: 10px 14px;
+  }
+  .hero {
+    min-height: 460px;
+    padding: 48px 18px;
+  }
+  .eyebrow {
+    font-size: 1rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.25rem, 11vw, 3rem);
+  }
+  .tagline {
+    font-size: 1rem;
+  }
+  .cta-row {
+    gap: 12px;
+  }
+  .cta {
+    width: 100%;
+    padding: 15px 20px;
+  }
+  .section {
+    padding: 48px 18px;
+  }
+  .contact-card,
+  .contact-details {
+    padding: 22px 18px;
+  }
+  .contact-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 }

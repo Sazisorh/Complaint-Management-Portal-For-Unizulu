@@ -1,4 +1,8 @@
 /* Status lookup layout and results */
+.track-page,
+.track-page * {
+  box-sizing: border-box;
+}
 body.track-page {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background-color: #f4f6f9;
@@ -92,4 +96,36 @@ body.track-page {
   margin: 10px 0 0;
   color: #5b6b82;
   font-size: 14px;
+}
+@media (max-width: 600px) {
+  body.track-page {
+    margin: 10px;
+  }
+  .track-page header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .track-page header h2 {
+    margin: 0;
+  }
+  .track-page .nav {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .track-page .card {
+    padding: 18px;
+  }
+  .track-page .track-status-grid {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .track-page .track-status-grid input {
+    min-width: 0;
+    width: 100%;
+  }
+  .track-page .track-status-grid .btn {
+    min-height: 44px;
+  }
 }

@@ -1,4 +1,5 @@
 import io
+import hmac
 import json
 import mimetypes
 import os
@@ -17,6 +18,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 try:
@@ -65,13 +67,33 @@ DEFAULT_EVIDENCE_FILES = []
 
 DEFAULT_DEPARTMENTS = ["Academic Affairs", "IT Services", "Finance", "Student Housing"]
 DEFAULT_COMPLAINT_CATEGORIES = ["Academic", "ICT", "Facilities / Housing", "Finance"]
+ROLE_USERNAME_PREFIXES = {"student": "20", "staff": "30", "admin": "50"}
+MAX_STAFF_ACCOUNTS = 50
+MAX_ADMIN_ACCOUNTS = 3
+
+
+def is_valid_username_for_role(username, role):
+    prefix = ROLE_USERNAME_PREFIXES.get(role)
+    return bool(
+        prefix
+        and username.isascii()
+        and username.isdigit()
+        and len(username) == 9
+        and username.startswith(prefix)
+    )
+
+
+def count_users_with_role(role, exclude_username=None):
+    return sum(
+        1 for username, user in users_db.items()
+        if username != exclude_username and user.get('role') == role
+    )
 
 
 def persist_state(users_data=None, complaints_data=None, departments_data=None, categories_data=None, evidence_data=None):
     if app.config.get('TESTING'):
         return
 
-    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     if users_data is None:
         users_data = globals().get('users_db', DEFAULT_USERS_DB)
     if complaints_data is None:
@@ -90,6 +112,10 @@ def persist_state(users_data=None, complaints_data=None, departments_data=None, 
         'complaint_categories': categories_data,
         'evidence_files': evidence_data,
     }
+    if mysql_storage_enabled() and globals().get('mysql_state_loaded', False):
+        persist_mysql_state(users_data, complaints_data)
+
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, 'w', encoding='utf-8') as file:
         json.dump(state, file, indent=2)
 
@@ -118,6 +144,22 @@ def load_state():
     evidence_files_list = state.get('evidence_files') or DEFAULT_EVIDENCE_FILES
 
     return users, complaints, departments_list, categories_list, evidence_files_list
+
+
+def hash_password(password):
+    return generate_password_hash(password)
+
+
+def verify_password(stored_password, password):
+    if not isinstance(stored_password, str):
+        return False
+    if stored_password.startswith(('scrypt:', 'pbkdf2:')):
+        return check_password_hash(stored_password, password)
+    return hmac.compare_digest(stored_password.encode('utf-8'), password.encode('utf-8'))
+
+
+def is_hashed_password(password):
+    return isinstance(password, str) and password.startswith(('scrypt:', 'pbkdf2:'))
 
 
 def normalize_category(category):
@@ -371,7 +413,7 @@ def get_database_connection():
         'database': os.getenv('MYSQL_DATABASE'),
     }
     if not database_config['host'] or not database_config['user'] or not database_config['database']:
-        raise RuntimeError('Set MYSQL_HOST, MYSQL_USER, and MYSQL_DATABASE in .env before submitting evidence.')
+        raise RuntimeError('Set MYSQL_HOST, MYSQL_USER, and MYSQL_DATABASE in .env before using MySQL storage.')
 
     try:
         import mysql.connector
@@ -379,6 +421,173 @@ def get_database_connection():
         raise RuntimeError('Install the project requirements to enable MySQL evidence storage.') from error
 
     return mysql.connector.connect(**database_config)
+
+
+def mysql_storage_enabled():
+    return all(os.getenv(name) for name in ('MYSQL_HOST', 'MYSQL_USER', 'MYSQL_DATABASE'))
+
+
+def persist_mysql_state(users_data, complaints_data):
+    connection = get_database_connection()
+    cursor = connection.cursor(dictionary=True)
+    try:
+        for username, user in users_data.items():
+            cursor.execute(
+                'INSERT INTO users '
+                '(username, full_name, email, password, role, department, password_reset_token_version) '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s) '
+                'ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), email = VALUES(email), '
+                'password = VALUES(password), role = VALUES(role), department = VALUES(department), '
+                'password_reset_token_version = VALUES(password_reset_token_version)',
+                (
+                    username,
+                    user.get('full_name', ''),
+                    user.get('email', ''),
+                    user.get('password', ''),
+                    user.get('role', 'student'),
+                    user.get('department', 'Academic Affairs'),
+                    user.get('password_reset_token_version'),
+                ),
+            )
+
+        cursor.execute('SELECT id, username FROM users')
+        user_ids = {row['username']: row['id'] for row in cursor.fetchall()}
+        for complaint in complaints_data:
+            cursor.execute(
+                'INSERT INTO complaints '
+                '(id, student_id, username, full_name, title, description, assigned_category, department, '
+                'status, created_at, reference_number, is_anonymous, evidence_path) '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) '
+                'ON DUPLICATE KEY UPDATE student_id = VALUES(student_id), username = VALUES(username), '
+                'full_name = VALUES(full_name), title = VALUES(title), description = VALUES(description), '
+                'assigned_category = VALUES(assigned_category), department = VALUES(department), '
+                'status = VALUES(status), created_at = VALUES(created_at), '
+                'reference_number = VALUES(reference_number), is_anonymous = VALUES(is_anonymous), '
+                'evidence_path = VALUES(evidence_path)',
+                (
+                    complaint['id'],
+                    user_ids.get(complaint.get('username')),
+                    complaint.get('username'),
+                    complaint.get('full_name', ''),
+                    complaint.get('category', 'Unassigned'),
+                    complaint.get('description', ''),
+                    complaint.get('category', 'Unassigned'),
+                    complaint.get('department', get_department_for_category(complaint.get('category'))),
+                    complaint.get('status', 'Pending'),
+                    complaint.get('created_at'),
+                    complaint.get('reference_number'),
+                    complaint.get('is_anonymous', False),
+                    complaint.get('evidence_path'),
+                ),
+            )
+
+        complaint_ids = [complaint['id'] for complaint in complaints_data]
+        if complaint_ids:
+            placeholders = ', '.join(['%s'] * len(complaint_ids))
+            cursor.execute(
+                f'DELETE FROM complaints WHERE id NOT IN ({placeholders})',
+                tuple(complaint_ids),
+            )
+        else:
+            cursor.execute('DELETE FROM complaints')
+
+        usernames = list(users_data)
+        if usernames:
+            placeholders = ', '.join(['%s'] * len(usernames))
+            cursor.execute(
+                f'UPDATE complaints SET student_id = NULL WHERE username NOT IN ({placeholders})',
+                tuple(usernames),
+            )
+            cursor.execute(
+                f'DELETE FROM users WHERE username NOT IN ({placeholders})',
+                tuple(usernames),
+            )
+        else:
+            cursor.execute('UPDATE complaints SET student_id = NULL')
+            cursor.execute('DELETE FROM users')
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def load_mysql_state():
+    connection = get_database_connection()
+    cursor = connection.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            'SELECT username, full_name, email, password, role, department, password_reset_token_version '
+            'FROM users'
+        )
+        users = cursor.fetchall()
+        cursor.execute(
+            'SELECT c.id, COALESCE(c.username, u.username) AS username, '
+            'COALESCE(NULLIF(c.full_name, \'\'), u.full_name) AS full_name, '
+            'c.description, c.assigned_category AS category, c.department, c.status, c.created_at, '
+            'c.reference_number, c.is_anonymous, c.evidence_path '
+            'FROM complaints c LEFT JOIN users u ON c.student_id = u.id'
+        )
+        complaints = cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
+
+    loaded_users = {
+        row['username']: {
+            'full_name': row['full_name'] or '',
+            'email': row['email'] or '',
+            'password': row['password'],
+            'role': row['role'],
+            'department': row['department'] or 'Academic Affairs',
+            **(
+                {'password_reset_token_version': row['password_reset_token_version']}
+                if row['password_reset_token_version'] else {}
+            ),
+        }
+        for row in users
+    }
+    loaded_complaints = []
+    for row in complaints:
+        created_at = row['created_at']
+        if hasattr(created_at, 'strftime'):
+            created_at = created_at.strftime('%Y-%m-%d')
+        loaded_complaints.append({
+            'id': row['id'],
+            'username': row['username'],
+            'full_name': row['full_name'] or ('Anonymous' if row['is_anonymous'] else ''),
+            'description': row['description'],
+            'category': row['category'],
+            'department': row['department'] or get_department_for_category(row['category']),
+            'status': row['status'],
+            'created_at': created_at,
+            'reference_number': row['reference_number'],
+            'is_anonymous': bool(row['is_anonymous']),
+            'evidence_path': row['evidence_path'],
+        })
+    return loaded_users, loaded_complaints
+
+
+mysql_state_loaded = False
+
+
+@app.before_request
+def load_mysql_state_before_request():
+    global mysql_state_loaded
+    if app.config.get('TESTING') or mysql_state_loaded or not mysql_storage_enabled():
+        return
+
+    stored_users, stored_complaints = load_mysql_state()
+    if stored_users or stored_complaints:
+        users_db.clear()
+        users_db.update(stored_users)
+        complaints_db[:] = stored_complaints
+    else:
+        persist_mysql_state(users_db, complaints_db)
+    mysql_state_loaded = True
 
 
 def migrate_legacy_evidence():
@@ -798,7 +1007,7 @@ def send_student_confirmation_email(complaint):
     return send_email_notification(subject, body, [student_email])
 
 
-def send_complaint_notification(complaint):
+def send_complaint_notifications(complaint):
     staff_emails = [
         get_user_email(username)
         for username, data in users_db.items()
@@ -820,7 +1029,11 @@ def send_complaint_notification(complaint):
     confirmation_sent = send_student_confirmation_email(complaint)
     if not staff_sent:
         app.logger.warning('New-grievance staff notification was not delivered.')
-    return confirmation_sent
+    return {'student': confirmation_sent, 'staff': staff_sent}
+
+
+def send_complaint_notification(complaint):
+    return send_complaint_notifications(complaint)['student']
 
 
 def send_status_update_notification(complaint, old_status, new_status):
@@ -854,6 +1067,21 @@ def track_online_users():
         'role': session.get('role') or user_data.get('role', 'student'),
         'last_seen': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
+
+
+@app.route('/static/css/student_dashboard.css')
+def legacy_student_stylesheet():
+    return send_file(os.path.join(app.static_folder, 'css', 'student_page.css'))
+
+
+@app.route('/static/js/student_dashboard.js')
+def legacy_student_script():
+    return send_file(os.path.join(app.static_folder, 'js', 'student_page.js'))
+
+
+@app.route('/static/css/staff_dashboard.css')
+def legacy_staff_stylesheet():
+    return send_file(os.path.join(app.static_folder, 'css', 'staff_page.css'))
 
 
 def get_online_users():
@@ -898,8 +1126,14 @@ def login():
             flash('Please select a role before logging in.', 'danger')
             return render_template('login.html', departments=departments)
 
-        if role == 'student' and (not username.isdigit() or len(username) != 9):
-            flash('Student number must be exactly 9 digits.', 'danger')
+        if role not in system_roles or not is_valid_username_for_role(username, role):
+            prefix = ROLE_USERNAME_PREFIXES.get(role, '')
+            role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}.get(role, 'User')
+            flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
+            return render_template('login.html', departments=departments)
+
+        if role == 'admin' and count_users_with_role('admin') > MAX_ADMIN_ACCOUNTS:
+            flash('Administrator sign-in is unavailable because the administrator account limit has been exceeded.', 'danger')
             return render_template('login.html', departments=departments)
 
         if role == 'staff' and not department:
@@ -907,7 +1141,10 @@ def login():
             return render_template('login.html', departments=departments)
 
         user = users_db.get(username)
-        if user and user['password'] == password and user['role'] == role:
+        if user and verify_password(user.get('password'), password) and user['role'] == role:
+            if not is_hashed_password(user.get('password')):
+                user['password'] = hash_password(password)
+                persist_state()
             session['username'] = username
             session['full_name'] = user['full_name']
             session['role'] = user['role']
@@ -939,28 +1176,48 @@ def register():
 
         if not username or not full_name or not password:
             flash('Name, username, and password are required.', 'danger')
-            return render_template('register.html')
+            return render_template('register.html', departments=departments)
+        if role != 'student':
+            if role not in {'staff', 'admin'}:
+                flash('Select a valid account type.', 'danger')
+                return render_template('register.html', departments=departments)
         if not is_valid_email_address(email):
             flash('Please enter a valid email address for account updates.', 'danger')
-            return render_template('register.html')
-        if role == 'student' and (not username.isdigit() or len(username) != 9):
-            flash('Student username must be exactly 9 digits.', 'danger')
-            return render_template('register.html')
+            return render_template('register.html', departments=departments)
+        if not is_valid_username_for_role(username, role):
+            prefix = ROLE_USERNAME_PREFIXES.get(role, '')
+            role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}.get(role, 'User')
+            flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
+            return render_template('register.html', departments=departments)
+        department = (request.form.get('department') or '').strip()
+        if role == 'staff' and department not in departments:
+            flash('Select a valid department to register as staff.', 'danger')
+            return render_template('register.html', departments=departments)
+        if role == 'staff' and count_users_with_role('staff') >= MAX_STAFF_ACCOUNTS:
+            flash(f'No more than {MAX_STAFF_ACCOUNTS} staff accounts may be registered.', 'danger')
+            return render_template('register.html', departments=departments)
+        if role == 'admin' and count_users_with_role('admin') >= MAX_ADMIN_ACCOUNTS:
+            flash(f'No more than {MAX_ADMIN_ACCOUNTS} administrator accounts may be registered.', 'danger')
+            return render_template('register.html', departments=departments)
+        if len(password) < 8:
+            flash('Passwords must be at least 8 characters long.', 'danger')
+            return render_template('register.html', departments=departments)
 
         if username in users_db:
             flash('Username already exists.', 'danger')
         else:
             users_db[username] = {
-                'password': password,
+                'password': hash_password(password),
                 'full_name': full_name,
                 'role': role,
                 'email': email,
+                'department': department or 'Academic Affairs',
             }
             persist_state()
             flash('Registration successful! Please log in.', 'success')
             return redirect(url_for('login'))
 
-    return render_template('register.html')
+    return render_template('register.html', departments=departments)
 
 @app.route('/forgot_password')
 @app.route('/forgot_password', methods=['POST'])
@@ -1032,7 +1289,7 @@ def reset_password(token):
         elif new_password != confirm_password:
             flash('The password confirmation does not match.', 'danger')
         else:
-            user['password'] = new_password
+            user['password'] = hash_password(new_password)
             user['password_reset_token_version'] = uuid.uuid4().hex
             persist_state()
             flash('Your password has been reset. Please log in with your new password.', 'success')
@@ -1052,7 +1309,7 @@ def student_dashboard():
     if latest_reference:
         session['last_reference_number'] = latest_reference
 
-    return render_template('student_dashboard.html', complaints=student_complaints, latest_reference=latest_reference)
+    return render_template('student_page.html', complaints=student_complaints, latest_reference=latest_reference)
 
 
 @app.route('/track_status')
@@ -1147,13 +1404,23 @@ def submit_grievance():
     evidence_files.append(evidence_metadata)
     persist_state()
 
-    email_sent = send_complaint_notification(complaint)
+    notification_results = send_complaint_notifications(complaint)
+    email_sent = notification_results['student']
+    staff_email_sent = notification_results['staff']
 
     session['last_reference_number'] = reference_number
     if wants_json:
-        return jsonify({'reference_number': reference_number, 'email_sent': email_sent}), 201
+        return jsonify({
+            'reference_number': reference_number,
+            'email_sent': email_sent,
+            'staff_email_sent': staff_email_sent,
+        }), 201
     if not email_sent:
         flash('Your grievance was saved, but the confirmation email could not be sent. Contact support if you need help.', 'warning')
+    elif not staff_email_sent:
+        flash('The confirmation email was accepted by the mail server, but the staff notification could not be sent. Please contact support.', 'warning')
+    else:
+        flash('Confirmation and staff notifications were accepted by the mail server. Delivery may take time; check inbox and spam folders.', 'info')
     flash(f'Grievance submitted successfully! Reference number: {reference_number}', 'success')
     return redirect(url_for('student_dashboard'))
 
@@ -1296,7 +1563,7 @@ def staff_dashboard():
         return redirect(url_for('login'))
 
     staff_complaints = filter_complaints_for_staff()
-    return render_template('staff_dashboard.html', complaints=staff_complaints, selected_department=selected_department, departments=departments)
+    return render_template('staff_page.html', complaints=staff_complaints, selected_department=selected_department, departments=departments)
 
 @app.route('/update_status/<int:complaint_id>', methods=['POST'])
 def update_status(complaint_id):
@@ -1361,13 +1628,25 @@ def add_user():
 
     if not username or not full_name:
         flash('Username and full name are required.', 'danger')
+    elif role not in system_roles:
+        flash('Select a valid role for the new user.', 'danger')
+    elif not is_valid_username_for_role(username, role):
+        prefix = ROLE_USERNAME_PREFIXES[role]
+        role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}[role]
+        flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
     elif not is_valid_email_address(email):
         flash('Please enter a valid email address for the new user.', 'danger')
     elif username in users_db:
         flash(f'User {username} already exists.', 'danger')
+    elif role == 'staff' and count_users_with_role('staff') >= MAX_STAFF_ACCOUNTS:
+        flash(f'No more than {MAX_STAFF_ACCOUNTS} staff accounts may be registered.', 'danger')
+    elif role == 'admin' and count_users_with_role('admin') >= MAX_ADMIN_ACCOUNTS:
+        flash(f'No more than {MAX_ADMIN_ACCOUNTS} administrator accounts may be registered.', 'danger')
+    elif len(request.form.get('password', '')) < 8:
+        flash('Passwords must be at least 8 characters long.', 'danger')
     else:
         users_db[username] = {
-            'password': request.form.get('password', '123'),
+            'password': hash_password(request.form.get('password', '')),
             'full_name': full_name,
             'role': role,
             'department': department,
@@ -1385,13 +1664,36 @@ def update_user_role(username):
         return redirect(url_for('login'))
 
     if username in users_db:
+        user = users_db[username]
         email = (request.form.get('email') or '').strip()
+        full_name = (request.form.get('full_name') or '').strip()
+        role = request.form.get('role', user.get('role', 'student'))
+        if not full_name:
+            flash('Full name is required for this user.', 'danger')
+            return redirect(url_for('administrator'))
         if not is_valid_email_address(email):
             flash('Please enter a valid email address for this user.', 'danger')
             return redirect(url_for('administrator'))
-        users_db[username]['email'] = email
-        users_db[username]['role'] = request.form.get('role', users_db[username].get('role', 'student'))
-        users_db[username]['department'] = request.form.get('department', users_db[username].get('department', 'Academic Affairs'))
+        if role not in system_roles:
+            flash('Select a valid role for this user.', 'danger')
+            return redirect(url_for('administrator'))
+        current_role = user.get('role', 'student')
+        if role != current_role:
+            if not is_valid_username_for_role(username, role):
+                prefix = ROLE_USERNAME_PREFIXES[role]
+                role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}[role]
+                flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
+                return redirect(url_for('administrator'))
+            if role == 'staff' and count_users_with_role('staff') >= MAX_STAFF_ACCOUNTS:
+                flash(f'No more than {MAX_STAFF_ACCOUNTS} staff accounts may be registered.', 'danger')
+                return redirect(url_for('administrator'))
+            if role == 'admin' and count_users_with_role('admin') >= MAX_ADMIN_ACCOUNTS:
+                flash(f'No more than {MAX_ADMIN_ACCOUNTS} administrator accounts may be registered.', 'danger')
+                return redirect(url_for('administrator'))
+        user['full_name'] = full_name
+        user['email'] = email
+        user['role'] = role
+        user['department'] = request.form.get('department', user.get('department', 'Academic Affairs'))
         persist_state()
         flash(f'User {username} updated successfully.', 'success')
 
@@ -1414,7 +1716,7 @@ def reset_user_password(username):
     elif new_password != confirm_password:
         flash('The password confirmation does not match.', 'danger')
     else:
-        user['password'] = new_password
+        user['password'] = hash_password(new_password)
         user['password_reset_token_version'] = uuid.uuid4().hex
         persist_state()
         flash(f'Password reset for {username}. Share the new password with the user directly.', 'success')

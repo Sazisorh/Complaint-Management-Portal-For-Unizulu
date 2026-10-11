@@ -113,9 +113,12 @@ async function submitComplaint() {
         throw new Error(result.error || 'I could not submit the grievance. Please try again.');
     }
 
+    const emailStatus = result.email_sent
+        ? ' A confirmation email has been sent to your registered email address.'
+        : ' Your grievance was saved, but the confirmation email could not be sent. Please contact support if you need help.';
     addMessage('bot', result.reference_number
-        ? `Your grievance was submitted. Your reference number is ${result.reference_number}.${result.email_sent ? '' : ' The confirmation email could not be sent, but your grievance is saved.'}`
-        : 'Your grievance was submitted. You can find its reference number on the dashboard.');
+        ? `Your grievance was submitted. Your reference number is ${result.reference_number}.${emailStatus}`
+        : 'Your grievance was submitted. You can find its reference number on the student page.');
     clearActiveDraft();
 }
 
@@ -136,7 +139,7 @@ async function handleChatInput() {
         if (referenceNumber || asksForStatus) {
             const reference = referenceNumber || (/latest|recent/i.test(value) ? latestReference : null);
             if (!reference || reference === 'No reference yet') {
-                addMessage('bot', 'Please provide the reference number from your dashboard so I can check its status.');
+                addMessage('bot', 'Please provide the reference number from your student page so I can check its status.');
                 return;
             }
             addMessage('bot', await lookupComplaintStatus(reference));

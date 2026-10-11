@@ -1,4 +1,8 @@
 /* Staff dashboard and grievance status controls */
+.staff-page,
+.staff-page * {
+  box-sizing: border-box;
+}
 body.staff-page {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background-color: #f4f6f9;
@@ -27,6 +31,11 @@ body.staff-page {
   padding: 20px;
   border-radius: 6px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+.staff-page .table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .staff-page table {
   width: 100%;
@@ -91,4 +100,28 @@ body.staff-page {
 }
 .staff-page .text-center {
   text-align: center;
+}
+@media (max-width: 700px) {
+  body.staff-page {
+    margin: 10px;
+  }
+  .staff-page header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+  .staff-page header h2 {
+    margin: 0;
+  }
+  .staff-page .container {
+    padding: 14px;
+  }
+  .staff-page .table-scroll table {
+    min-width: 760px;
+  }
+  .staff-page .status-form select,
+  .staff-page .status-form button {
+    min-height: 44px;
+  }
 }
