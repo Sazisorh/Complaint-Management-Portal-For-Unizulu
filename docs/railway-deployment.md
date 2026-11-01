@@ -65,9 +65,10 @@
   `EMAIL_USE_TLS=true`, and `EMAIL_USE_SSL=false`) as Railway service
   variables. Use a Gmail app password, not the account password.
 - Set `OLLAMA_BASE_URL` to a reachable hosted Ollama-compatible endpoint if
-  open-ended chatbot responses should use a model. The default
-  `127.0.0.1:11434` only refers to the web-service container; it does not reach
-  a developer's computer. Direct grievance-status lookup and official
-  UNIZULU website search do not depend on Ollama.
+  open-ended chatbot responses should use a model. Without that variable, or
+  when the configured model service is unavailable, the chatbot uses built-in
+  guidance for grievance submissions, status checks, and official information
+  lookup. The default `127.0.0.1:11434` only refers to the web-service
+  container; it does not reach a developer's computer.
 - The Railway domain uses HTTPS. Keep `FLASK_SECRET_KEY`, database credentials,
   SMTP credentials, and any model endpoint tokens in Railway's variable manager.

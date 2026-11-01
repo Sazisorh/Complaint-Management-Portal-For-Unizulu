@@ -992,6 +992,42 @@ def test_generate_chatbot_reply_uses_faster_local_ollama_settings(monkeypatch):
     assert request_data['options']['num_predict'] == 128
 
 
+def test_chatbot_uses_builtin_guidance_when_no_ollama_is_configured(monkeypatch):
+    import app as app_module
+
+    monkeypatch.delenv('OLLAMA_BASE_URL', raising=False)
+    monkeypatch.setattr(
+        app_module,
+        'urlopen',
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('No model service should be required.')),
+    )
+
+    reply = app_module.generate_chatbot_reply([
+        {'role': 'user', 'content': 'Can you help me with something?'},
+    ])
+
+    assert 'submit a grievance' in reply
+    assert 'check a reference number' in reply
+    assert 'official UNIZULU website' in reply
+
+
+def test_chatbot_falls_back_to_builtin_guidance_when_ollama_is_unavailable(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setenv('OLLAMA_BASE_URL', 'http://unavailable.example.test')
+    monkeypatch.setattr(
+        app_module,
+        'urlopen',
+        lambda *args, **kwargs: (_ for _ in ()).throw(app_module.URLError('unavailable')),
+    )
+
+    reply = app_module.generate_chatbot_reply([
+        {'role': 'user', 'content': 'Can you help me with something?'},
+    ])
+
+    assert reply == app_module.CHATBOT_FALLBACK_REPLY
+
+
 def test_safety_keyword_escalation_does_not_call_generator(client, monkeypatch):
     import app as app_module
 

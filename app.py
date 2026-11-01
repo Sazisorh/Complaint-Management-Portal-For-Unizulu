@@ -229,6 +229,10 @@ CHATBOT_SYSTEM_PROMPT = (
     'If a suggested grievance category is provided, explain it as a suggestion, not a final decision. '
     f'For immediate danger, tell the student to call {CHATBOT_EMERGENCY_CONTACT} or emergency services immediately.'
 )
+CHATBOT_FALLBACK_REPLY = (
+    'I can help you submit a grievance, check a reference number, or find information on the official '
+    'UNIZULU website. Please tell me which of these you need, or describe the issue you want to report.'
+)
 
 
 @lru_cache(maxsize=1)
@@ -287,6 +291,9 @@ def infer_chatbot_fallback(message):
 
 
 def generate_chatbot_reply(messages, suggested_category=None):
+    if not os.getenv('OLLAMA_BASE_URL'):
+        return CHATBOT_FALLBACK_REPLY
+
     instructions = CHATBOT_SYSTEM_PROMPT
     if suggested_category:
         instructions += (
@@ -311,12 +318,14 @@ def generate_chatbot_reply(messages, suggested_category=None):
     try:
         with urlopen(ollama_request, timeout=120) as response:
             result = json.loads(response.read().decode('utf-8'))
-    except URLError as error:
-        raise RuntimeError('The local Ollama server is unavailable.') from error
+    except (URLError, OSError, ValueError):
+        app.logger.warning('Configured Ollama service is unavailable; using built-in chatbot guidance.')
+        return CHATBOT_FALLBACK_REPLY
 
     reply = result.get('message', {}).get('content', '').strip()
     if not reply:
-        raise RuntimeError('The local model returned an empty response.')
+        app.logger.warning('Configured Ollama service returned an empty reply; using built-in chatbot guidance.')
+        return CHATBOT_FALLBACK_REPLY
     return reply
 
 
