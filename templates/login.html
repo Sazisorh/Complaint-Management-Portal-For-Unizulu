@@ -26,18 +26,10 @@
                     <option value="" selected disabled>Select Role</option>
                     <option value="student">Student</option>
                     <option value="staff">Staff Member</option>
+                    <option value="manager">Management</option>
                     <option value="admin">System Administrator</option>
                 </select>
-            </div>
-            <!-- JavaScript reveals this field only when staff is selected. -->
-            <div class="form-group is-hidden" id="department-group">
-                <label for="department">Department</label>
-                <select name="department" id="department">
-                    <option value="" selected disabled>Select Department</option>
-                    {% for department in departments %}
-                    <option value="{{ department }}">{{ department }}</option>
-                    {% endfor %}
-                </select>
+                <small>Staff access is limited to the department assigned to the account.</small>
             </div>
             <div class="form-group">
                 <label for="username">Username / ID</label>

@@ -67,7 +67,8 @@ DEFAULT_EVIDENCE_FILES = []
 
 DEFAULT_DEPARTMENTS = ["Academic Affairs", "IT Services", "Finance", "Student Housing"]
 DEFAULT_COMPLAINT_CATEGORIES = ["Academic", "ICT", "Facilities / Housing", "Finance"]
-ROLE_USERNAME_PREFIXES = {"student": "20", "staff": "30", "admin": "50"}
+ROLE_USERNAME_PREFIXES = {"student": "20", "staff": "30", "manager": "40", "admin": "50"}
+LOGIN_ROLES = {"student", "staff", "manager", "admin"}
 MAX_STAFF_ACCOUNTS = 50
 MAX_ADMIN_ACCOUNTS = 3
 
@@ -385,15 +386,22 @@ def chatbot_unizulu_search():
 
 
 def get_staff_department_filter():
-    selected_department = session.get('department')
-    if selected_department:
-        return selected_department
+    if session.get('role') != 'staff':
+        return None
+
     user = users_db.get(session.get('username'), {})
-    return user.get('department', 'Academic Affairs')
+    if user.get('role') != 'staff':
+        return None
+
+    department = user.get('department')
+    return department if department in departments else None
 
 
 def filter_complaints_for_staff():
     department = get_staff_department_filter()
+    if department is None:
+        return []
+
     filtered = []
 
     for complaint in complaints_db:
@@ -428,8 +436,13 @@ def mysql_storage_enabled():
 
 
 def persist_mysql_state(users_data, complaints_data):
-    connection = get_database_connection()
-    cursor = connection.cursor(dictionary=True)
+    try:
+        connection = get_database_connection()
+        cursor = connection.cursor(dictionary=True)
+    except Exception:
+        app.logger.warning('MySQL state persistence skipped because the database is unavailable.', exc_info=True)
+        return
+
     try:
         for username, user in users_data.items():
             cursor.execute(
@@ -508,16 +521,23 @@ def persist_mysql_state(users_data, complaints_data):
 
         connection.commit()
     except Exception:
-        connection.rollback()
-        raise
+        app.logger.warning('Failed to sync MySQL state; leaving JSON state as the source of truth.', exc_info=True)
+        if connection:
+            connection.rollback()
+        return
     finally:
         cursor.close()
         connection.close()
 
 
 def load_mysql_state():
-    connection = get_database_connection()
-    cursor = connection.cursor(dictionary=True)
+    try:
+        connection = get_database_connection()
+        cursor = connection.cursor(dictionary=True)
+    except Exception:
+        app.logger.warning('MySQL state could not be loaded; falling back to empty in-memory state.', exc_info=True)
+        return {}, []
+
     try:
         cursor.execute(
             'SELECT username, full_name, email, password, role, department, password_reset_token_version '
@@ -532,6 +552,9 @@ def load_mysql_state():
             'FROM complaints c LEFT JOIN users u ON c.student_id = u.id'
         )
         complaints = cursor.fetchall()
+    except Exception:
+        app.logger.warning('MySQL tables are not ready or are missing; falling back to an empty sync state.', exc_info=True)
+        return {}, []
     finally:
         cursor.close()
         connection.close()
@@ -793,7 +816,7 @@ def build_admin_analytics():
     }
 
 # In-memory portal state loaded from the configured data file
-system_roles = ["student", "staff", "admin"]
+system_roles = ["student", "staff", "manager", "admin"]
 users_db, complaints_db, departments, complaint_categories, evidence_files = load_state()
 online_users = {}
 
@@ -1162,7 +1185,6 @@ def login():
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
         role = request.form.get('role')
-        department = (request.form.get('department') or '').strip()
 
         if not role:
             flash('Please select a role before logging in.', 'danger')
@@ -1170,7 +1192,12 @@ def login():
 
         if role not in system_roles or not is_valid_username_for_role(username, role):
             prefix = ROLE_USERNAME_PREFIXES.get(role, '')
-            role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}.get(role, 'User')
+            role_label = {
+                'student': 'Student',
+                'staff': 'Staff',
+                'manager': 'Management',
+                'admin': 'Administrator',
+            }.get(role, 'User')
             flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
             return render_template('login.html', departments=departments)
 
@@ -1178,12 +1205,11 @@ def login():
             flash('Administrator sign-in is unavailable because the administrator account limit has been exceeded.', 'danger')
             return render_template('login.html', departments=departments)
 
-        if role == 'staff' and not department:
-            flash('Please select a department before logging in as staff.', 'danger')
-            return render_template('login.html', departments=departments)
-
         user = users_db.get(username)
         if user and verify_password(user.get('password'), password) and user['role'] == role:
+            if role == 'staff' and user.get('department') not in departments:
+                flash('This staff account has no valid assigned department. Contact a system administrator.', 'danger')
+                return render_template('login.html', departments=departments)
             if not is_hashed_password(user.get('password')):
                 user['password'] = hash_password(password)
                 persist_state()
@@ -1191,13 +1217,15 @@ def login():
             session['full_name'] = user['full_name']
             session['role'] = user['role']
             if role == 'staff':
-                session['department'] = department or user.get('department', 'Academic Affairs')
+                session['department'] = user['department']
             else:
                 session.pop('department', None)
 
             flash('Logged in successfully!', 'success')
             if role == 'staff':
                 return redirect(url_for('staff_dashboard'))
+            elif role == 'manager':
+                return redirect(url_for('management'))
             elif role == 'admin':
                 return redirect(url_for('administrator'))
             else:
@@ -1220,15 +1248,19 @@ def register():
             flash('Name, username, and password are required.', 'danger')
             return render_template('register.html', departments=departments)
         if role != 'student':
-            if role not in {'staff', 'admin'}:
-                flash('Select a valid account type.', 'danger')
-                return render_template('register.html', departments=departments)
+            flash('Only student accounts can be created through public registration.', 'danger')
+            return render_template('register.html', departments=departments)
         if not is_valid_email_address(email):
             flash('Please enter a valid email address for account updates.', 'danger')
             return render_template('register.html', departments=departments)
         if not is_valid_username_for_role(username, role):
             prefix = ROLE_USERNAME_PREFIXES.get(role, '')
-            role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}.get(role, 'User')
+            role_label = {
+                'student': 'Student',
+                'staff': 'Staff',
+                'manager': 'Management',
+                'admin': 'Administrator',
+            }.get(role, 'User')
             flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
             return render_template('register.html', departments=departments)
         department = (request.form.get('department') or '').strip()
@@ -1599,9 +1631,10 @@ def staff_dashboard():
         flash('Access restricted to staff only.', 'danger')
         return redirect(url_for('login'))
 
-    selected_department = session.get('department') or users_db.get(session.get('username'), {}).get('department', 'Academic Affairs')
+    selected_department = get_staff_department_filter()
     if not selected_department:
-        flash('Please select a department before viewing grievances.', 'danger')
+        session.clear()
+        flash('This staff account has no valid assigned department. Contact a system administrator.', 'danger')
         return redirect(url_for('login'))
 
     staff_complaints = filter_complaints_for_staff()
@@ -1612,10 +1645,19 @@ def update_status(complaint_id):
     if 'username' not in session or session.get('role') != 'staff':
         return redirect(url_for('login'))
 
+    department = get_staff_department_filter()
+    if department is None:
+        session.clear()
+        flash('This staff account has no valid assigned department. Contact a system administrator.', 'danger')
+        return redirect(url_for('login'))
+
     new_status = request.form.get('status')
     notification_sent = None
     for c in complaints_db:
         if c['id'] == complaint_id:
+            complaint_department = c.get('department') or get_department_for_category(c.get('category'))
+            if complaint_department != department:
+                abort(403)
             previous_status = c.get('status')
             c['status'] = new_status
             persist_state()
@@ -1645,15 +1687,25 @@ def administrator():
         }
         for username, data in users_db.items()
     ]
-    analytics = build_admin_analytics()
     return render_template(
         'Administrator.html',
         users_list=users_list,
         roles=system_roles,
         departments=departments,
         complaint_categories=complaint_categories,
-        analytics=analytics,
-        online_users_list=get_online_users()
+    )
+
+
+@app.route('/management')
+def management():
+    if 'username' not in session or session.get('role') != 'manager':
+        flash('Access restricted to management.', 'danger')
+        return redirect(url_for('login'))
+
+    return render_template(
+        'management.html',
+        analytics=build_admin_analytics(),
+        online_users_list=get_online_users(),
     )
 
 
@@ -1674,10 +1726,17 @@ def add_user():
         flash('Select a valid role for the new user.', 'danger')
     elif not is_valid_username_for_role(username, role):
         prefix = ROLE_USERNAME_PREFIXES[role]
-        role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}[role]
+        role_label = {
+            'student': 'Student',
+            'staff': 'Staff',
+            'manager': 'Management',
+            'admin': 'Administrator',
+        }[role]
         flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
     elif not is_valid_email_address(email):
         flash('Please enter a valid email address for the new user.', 'danger')
+    elif role == 'staff' and department not in departments:
+        flash('Select a valid department for the staff account.', 'danger')
     elif username in users_db:
         flash(f'User {username} already exists.', 'danger')
     elif role == 'staff' and count_users_with_role('staff') >= MAX_STAFF_ACCOUNTS:
@@ -1719,11 +1778,20 @@ def update_user_role(username):
         if role not in system_roles:
             flash('Select a valid role for this user.', 'danger')
             return redirect(url_for('administrator'))
+        department = request.form.get('department', user.get('department', 'Academic Affairs')).strip()
+        if role == 'staff' and department not in departments:
+            flash('Select a valid department for the staff account.', 'danger')
+            return redirect(url_for('administrator'))
         current_role = user.get('role', 'student')
         if role != current_role:
             if not is_valid_username_for_role(username, role):
                 prefix = ROLE_USERNAME_PREFIXES[role]
-                role_label = {'student': 'Student', 'staff': 'Staff', 'admin': 'Administrator'}[role]
+                role_label = {
+                    'student': 'Student',
+                    'staff': 'Staff',
+                    'manager': 'Management',
+                    'admin': 'Administrator',
+                }[role]
                 flash(f'{role_label} number must be exactly 9 digits and start with {prefix}.', 'danger')
                 return redirect(url_for('administrator'))
             if role == 'staff' and count_users_with_role('staff') >= MAX_STAFF_ACCOUNTS:
@@ -1735,7 +1803,7 @@ def update_user_role(username):
         user['full_name'] = full_name
         user['email'] = email
         user['role'] = role
-        user['department'] = request.form.get('department', user.get('department', 'Academic Affairs'))
+        user['department'] = department
         persist_state()
         flash(f'User {username} updated successfully.', 'success')
 
@@ -1845,9 +1913,9 @@ def remove_category(category):
     return redirect(url_for('administrator'))
 
 
-@app.route('/administrator/generate_report')
+@app.route('/management/generate_report')
 def generate_report():
-    if 'username' not in session or session.get('role') != 'admin':
+    if 'username' not in session or session.get('role') != 'manager':
         return redirect(url_for('login'))
 
     analytics = build_admin_analytics()

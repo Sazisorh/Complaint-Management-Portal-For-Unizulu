@@ -281,6 +281,44 @@ body.student-page {
   color: #fff;
   margin-left: auto;
 }
+.student-page .chatbot-loading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #475569;
+}
+.student-page .chatbot-loading[hidden] {
+  display: none;
+}
+.student-page .chatbot-loading-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.student-page .chatbot-loading-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: chatbotLoadingPulse 1s ease-in-out infinite;
+}
+.student-page .chatbot-loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.student-page .chatbot-loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes chatbotLoadingPulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
 .student-page .chatbot-input-wrap {
   display: flex;
   align-items: center;

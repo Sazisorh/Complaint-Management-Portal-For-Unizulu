@@ -35,11 +35,20 @@
    and grievances, and app updates are written to both MySQL and the JSON
    backup.
 6. Create the first administrator from that same service shell by running
-   `python scripts/create_admin.py`. Enter a unique username, a valid email,
-   and a unique password of at least 12 characters when prompted. The password
-   is hashed before it is stored. Public registration only creates student
-   accounts.
-7. Open the generated Railway domain and verify registration, login, and
+   `python scripts/create_admin.py`. Enter a unique 9-digit username starting
+   with `50`, a valid email, and a unique password of at least 12 characters
+   when prompted. Administrator login requires that username format. The
+   password is hashed before it is stored. Public registration only creates
+   student accounts. An administrator can create staff and management accounts
+   from the System Administration page; those roles cannot self-register.
+   Assign each staff account to its department. Staff access is bound to that
+   saved department, and the login form cannot select or change it.
+7. Create a management account from the service shell by running
+   `python scripts/create_manager.py`. Enter a unique 9-digit username starting
+   with `40`, a valid email, and a unique password of at least 12 characters.
+   Management users can access the separate reports dashboard and download
+   complaint reports; administrator accounts cannot access reports.
+8. Open the generated Railway domain and verify registration, login, and
    grievance submission. The evidence test requires the MySQL service to be
    reachable.
 

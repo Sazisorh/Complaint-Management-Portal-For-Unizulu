@@ -4,6 +4,8 @@ const chatbotToggle = document.getElementById('chatbot-toggle');
 const chatbotPanel = document.getElementById('chatbot-panel');
 const chatbotInput = document.getElementById('chatbot-input');
 const chatbotBody = document.getElementById('chatbot-body');
+const chatbotLoading = document.getElementById('chatbot-loading');
+const chatbotLoadingText = document.getElementById('chatbot-loading-text');
 const chatbotSend = document.getElementById('chatbot-send');
 const chatbotEvidenceInput = document.getElementById('chatbot-evidence');
 const chatbotUploadBtn = document.getElementById('chatbot-upload');
@@ -86,9 +88,19 @@ function pauseActiveDraft() {
 }
 
 function resumePausedDraft() {
-    const draft = pausedDrafts.pop();
-    if (!draft) return false;
+    if (!pausedDrafts.length) return false;
 
+    const activeDraft = chatState.mode ? {
+        mode: chatState.mode,
+        category: chatState.category,
+        description: chatState.description,
+        evidence: getSelectedEvidenceFile(),
+        anonymous: chatState.anonymous
+    } : null;
+    const draft = pausedDrafts.pop();
+    if (activeDraft) pausedDrafts.push(activeDraft);
+
+    chatbotEvidenceInput.value = '';
     Object.assign(chatState, draft);
     chatbotEvidenceLabel.textContent = draft.evidence ? draft.evidence.name : 'No evidence selected';
     return true;
@@ -122,6 +134,13 @@ async function submitComplaint() {
     clearActiveDraft();
 }
 
+function showChatbotLoading(message) {
+    chatbotLoadingText.textContent = message;
+    chatbotLoading.hidden = false;
+    chatbotBody.appendChild(chatbotLoading);
+    chatbotBody.scrollTop = chatbotBody.scrollHeight;
+}
+
 // Handle status lookups and the assistant's guided submission flow.
 async function handleChatInput() {
     if (isBusy) return;
@@ -132,11 +151,23 @@ async function handleChatInput() {
     chatbotInput.value = '';
     isBusy = true;
     chatbotSend.disabled = true;
+    showChatbotLoading('Preparing your response');
 
     try {
+        if (/^(resume|resume draft|continue previous draft)$/i.test(value)) {
+            showChatbotLoading('Resuming your grievance draft');
+            if (resumePausedDraft()) {
+                addMessage('bot', `I resumed your ${chatState.category} grievance draft. You can continue it, or ask me something else at any time.`);
+            } else {
+                addMessage('bot', 'There is no paused grievance draft to resume.');
+            }
+            return;
+        }
+
         const referenceNumber = value.match(/GRV-[A-Z0-9-]+/i)?.[0];
         const asksForStatus = /status|track|reference|latest|recent/i.test(value);
         if (referenceNumber || asksForStatus) {
+            showChatbotLoading('Checking grievance status');
             const reference = referenceNumber || (/latest|recent/i.test(value) ? latestReference : null);
             if (!reference || reference === 'No reference yet') {
                 addMessage('bot', 'Please provide the reference number from your student page so I can check its status.');
@@ -147,26 +178,20 @@ async function handleChatInput() {
         }
 
         if (isOfficialInfoQuestion(value)) {
+            showChatbotLoading('Searching official UNIZULU information');
             addMessage('bot', await lookupOfficialInfo(value));
             return;
         }
 
-        if (/^(resume|resume draft|continue previous draft)$/i.test(value) && !chatState.mode) {
-            if (resumePausedDraft()) {
-                addMessage('bot', `I resumed your ${chatState.category} grievance draft. You can continue it, or ask me something else at any time.`);
-            } else {
-                addMessage('bot', 'There is no paused grievance draft to resume.');
-            }
-            return;
-        }
-
         if (chatState.mode && /^(cancel|cancel submission|start over)$/i.test(value)) {
+            showChatbotLoading('Updating your grievance draft');
             clearActiveDraft();
             addMessage('bot', 'I cancelled the draft. You can ask a question or describe a grievance whenever you are ready.');
             return;
         }
 
         if (chatState.mode === 'submit-evidence' && /^(continue|ready|i am ready|done|next|proceed)$/i.test(value)) {
+            showChatbotLoading('Preparing your grievance submission');
             const evidence = getSelectedEvidenceFile();
             if (!evidence) {
                 addMessage('bot', 'Please use Upload Evidence to select a supporting file before continuing.');
@@ -188,12 +213,14 @@ async function handleChatInput() {
                 chatState.anonymous = null;
             }
             if (chatState.anonymous !== null) {
+                showChatbotLoading('Submitting your grievance');
                 addMessage('bot', 'Submitting your grievance...');
                 await submitComplaint();
                 return;
             }
         }
 
+        showChatbotLoading('Thinking');
         const result = await generateChatbotReply();
         addMessage('bot', result.reply);
         if (result.needs_safety_review) {
@@ -215,6 +242,7 @@ async function handleChatInput() {
     } finally {
         isBusy = false;
         chatbotSend.disabled = false;
+        chatbotLoading.hidden = true;
     }
 }
 

@@ -19,6 +19,10 @@ body.admin-page {
   margin: 0;
   font-size: 1.4rem;
 }
+.admin-page header a:not(.logout-btn) {
+  color: white;
+  font-weight: 600;
+}
 .admin-page .logout-btn {
   background-color: #d9534f;
   color: white;

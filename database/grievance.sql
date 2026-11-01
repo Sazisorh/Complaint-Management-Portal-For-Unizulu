@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     full_name VARCHAR(255) NOT NULL,
     email VARCHAR(150) NOT NULL,
     password VARCHAR(255) NOT NULL,
-    role ENUM('student', 'staff', 'admin') NOT NULL,
+    role ENUM('student', 'staff', 'manager', 'admin') NOT NULL,
     department VARCHAR(100) NOT NULL DEFAULT 'Academic Affairs',
     password_reset_token_version VARCHAR(64) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

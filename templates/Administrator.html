@@ -6,7 +6,7 @@
     <title>Administrator Panel - UNIZULU Portal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/Administrator.css') }}">
 </head>
-<body class="admin-page" data-category-counts='{{ analytics.category_counts|tojson }}' data-status-counts='{{ analytics.status_counts|tojson }}'>
+<body class="admin-page">
 
     <header>
         <h2>System Administration Control Panel</h2>
@@ -26,89 +26,11 @@
           {% endif %}
         {% endwith %}
 
-        <!-- Show system health and report actions. -->
+        <!-- Show system health and provide access to management reports. -->
         <div class="card">
             <h3>System Status & ML Model Overview</h3>
             <p><strong>Machine Learning Classifier:</strong> <span class="status-active">Active (TF-IDF + Naive Bayes / SVM)</span></p>
             <p><strong>Database Connection:</strong> <span class="status-active">Connected</span></p>
-            <a href="{{ url_for('generate_report') }}" class="btn-link">Generate Complaint Report</a>
-        </div>
-
-        <div class="card">
-            <h3>Online Users</h3>
-            {% if online_users_list %}
-                <div class="table-scroll">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Username</th>
-                                <th>Role</th>
-                                <th>Last Seen</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for user in online_users_list %}
-                            <tr>
-                                <td>{{ user.full_name }}</td>
-                                <td>{{ user.username }}</td>
-                                <td><span class="badge badge-{{ user.role }}">{{ user.role|title }}</span></td>
-                                <td>{{ user.last_seen }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            {% else %}
-                <p>No users are currently online.</p>
-            {% endif %}
-        </div>
-
-        <!-- Summarize grievance totals and category/status analytics. -->
-        <div class="card">
-            <h3>Complaint Analytics</h3>
-            <div class="stats">
-                <div class="stat-box"><span>Total Complaints</span><strong>{{ analytics.total_complaints }}</strong></div>
-                <div class="stat-box"><span>Pending</span><strong>{{ analytics.status_counts.get('Pending', 0) }}</strong></div>
-                <div class="stat-box"><span>In Progress</span><strong>{{ analytics.status_counts.get('In-Progress', 0) }}</strong></div>
-                <div class="stat-box"><span>Rejected</span><strong>{{ analytics.status_counts.get('Rejected', 0) }}</strong></div>
-                <div class="stat-box"><span>Resolved</span><strong>{{ analytics.status_counts.get('Resolved', 0) }}</strong></div>
-                <div class="stat-box"><span>Withdrawn</span><strong>{{ analytics.status_counts.get('Withdrawn', 0) }}</strong></div>
-            </div>
-
-            <div class="chart-grid">
-                <div class="chart-card">
-                    <h4>Categories by Response Volume</h4>
-                    <canvas id="categoryChart"></canvas>
-                </div>
-                <div class="chart-card">
-                    <h4>Status Percentages</h4>
-                    <canvas id="statusChart"></canvas>
-                </div>
-            </div>
-
-            <div class="table-scroll">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Count</th>
-                            <th>Percentage</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for category, count in analytics.category_counts.items() %}
-                        <tr>
-                            <td>{{ category }}</td>
-                            <td>{{ count }}</td>
-                            <td>{{ analytics.category_percentages.get(category, 0) }}%</td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="3">No complaints uploaded yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
         </div>
 
         <!-- Provide account management alongside department and category settings. -->
@@ -116,7 +38,7 @@
             <div class="card">
                 <h3>Manage User Accounts</h3>
 
-                <p>Student IDs start with 20, staff IDs with 30, and administrator IDs with 50; all IDs must contain 9 digits. A maximum of 50 staff and 3 administrators may be registered.</p>
+                <p>Student IDs start with 20, staff IDs with 30, management IDs with 40, and administrator IDs with 50; all IDs must contain 9 digits. A maximum of 50 staff and 3 administrators may be registered.</p>
                 <form action="{{ url_for('add_user') }}" method="POST">
                     <div class="form-row">
                         <div class="field-group">
@@ -266,7 +188,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
     <script src="{{ url_for('static', filename='js/password_toggle.js') }}" defer></script>
 

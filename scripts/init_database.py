@@ -19,7 +19,7 @@ def main():
             'full_name VARCHAR(255) NOT NULL, '
             'email VARCHAR(150) NOT NULL, '
             'password VARCHAR(255) NOT NULL, '
-            "role ENUM('student', 'staff', 'admin') NOT NULL, "
+            "role ENUM('student', 'staff', 'manager', 'admin') NOT NULL, "
             "department VARCHAR(100) NOT NULL DEFAULT 'Academic Affairs', "
             'password_reset_token_version VARCHAR(64) NULL, '
             'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
@@ -55,6 +55,9 @@ def main():
         }.items():
             if column not in user_columns:
                 cursor.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
+        cursor.execute(
+            "ALTER TABLE users MODIFY role ENUM('student', 'staff', 'manager', 'admin') NOT NULL"
+        )
 
         cursor.execute(
             'SELECT INDEX_NAME FROM information_schema.STATISTICS '

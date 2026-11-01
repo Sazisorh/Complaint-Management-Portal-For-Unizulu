@@ -1,19 +1,10 @@
 const roleSelect = document.getElementById('role');
-const departmentGroup = document.getElementById('department-group');
-const departmentSelect = document.getElementById('department');
 const usernameInput = document.getElementById('username');
 const logo = document.querySelector('.auth-login .logo');
 
-// Staff need a department, and each role has its own ID prefix.
+// Each role has its own ID prefix. Staff departments are assigned to accounts.
 function toggleDepartmentField() {
-    const isStaff = roleSelect.value === 'staff';
-    const prefix = { student: '20', staff: '30', admin: '50' }[roleSelect.value];
-    departmentGroup.classList.toggle('is-hidden', !isStaff);
-    departmentSelect.required = isStaff;
-    if (!isStaff) {
-        departmentSelect.value = '';
-    }
-
+    const prefix = { student: '20', staff: '30', manager: '40', admin: '50' }[roleSelect.value];
     if (prefix) {
         usernameInput.pattern = `${prefix}[0-9]{7}`;
         usernameInput.title = `ID must be exactly 9 digits and start with ${prefix}.`;

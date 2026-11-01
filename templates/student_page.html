@@ -135,6 +135,10 @@
         <div class="chatbot-header"><span class="status-dot"></span>AI Grievance Guide</div>
         <div class="chatbot-body" id="chatbot-body">
             <div class="chat-message bot">Hi, how can I help you?</div>
+            <div class="chat-message bot chatbot-loading" id="chatbot-loading" role="status" aria-live="polite" hidden>
+                <span id="chatbot-loading-text">Preparing your response</span>
+                <span class="chatbot-loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+            </div>
         </div>
         <div class="chatbot-input-wrap">
             <input id="chatbot-evidence" class="is-hidden" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" />

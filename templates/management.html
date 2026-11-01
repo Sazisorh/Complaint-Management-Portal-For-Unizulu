@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Management Reports - UNIZULU Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/Administrator.css') }}">
+</head>
+<body class="admin-page" data-category-counts='{{ analytics.category_counts|tojson }}' data-status-counts='{{ analytics.status_counts|tojson }}'>
+    <header>
+        <h2>Management Reports</h2>
+        <div>
+            <span>Management: <strong>{{ session.get('full_name', 'Manager') }}</strong></span>
+            &nbsp; | &nbsp;
+            <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <section class="card">
+            <h3>Complaint Statistics</h3>
+            <div class="stats">
+                <div class="stat-box"><span>Total Complaints</span><strong>{{ analytics.total_complaints }}</strong></div>
+                <div class="stat-box"><span>Pending</span><strong>{{ analytics.status_counts.get('Pending', 0) }}</strong></div>
+                <div class="stat-box"><span>In Progress</span><strong>{{ analytics.status_counts.get('In-Progress', 0) }}</strong></div>
+                <div class="stat-box"><span>Rejected</span><strong>{{ analytics.status_counts.get('Rejected', 0) }}</strong></div>
+                <div class="stat-box"><span>Resolved</span><strong>{{ analytics.status_counts.get('Resolved', 0) }}</strong></div>
+                <div class="stat-box"><span>Withdrawn</span><strong>{{ analytics.status_counts.get('Withdrawn', 0) }}</strong></div>
+            </div>
+
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h4>Complaints by Category</h4>
+                    <canvas id="categoryChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h4>Complaints by Status</h4>
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Count</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category, count in analytics.category_counts.items() %}
+                        <tr>
+                            <td>{{ category }}</td>
+                            <td>{{ count }}</td>
+                            <td>{{ analytics.category_percentages.get(category, 0) }}%</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3">No complaints have been submitted yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="card">
+            <h3>Reports</h3>
+            <p>Generate an Excel workbook with complaint totals, category breakdowns, and complaint details.</p>
+            <p><strong>Latest report data:</strong> {{ analytics.latest_report }}</p>
+            <a href="{{ url_for('generate_report') }}" class="btn-link">Download Complaint Report (Excel)</a>
+        </section>
+
+        <section class="card">
+            <h3>Online Users</h3>
+            {% if online_users_list %}
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in online_users_list %}
+                            <tr>
+                                <td>{{ user.full_name }}</td>
+                                <td>{{ user.username }}</td>
+                                <td><span class="badge badge-{{ user.role }}">{{ user.role|title }}</span></td>
+                                <td>{{ user.last_seen }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>No users are currently online.</p>
+            {% endif %}
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/management.js') }}"></script>
+</body>
+</html>

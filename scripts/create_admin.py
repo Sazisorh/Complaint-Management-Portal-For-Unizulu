@@ -13,13 +13,17 @@ def main():
     portal.load_mysql_state_before_request()
 
     username = input('Administrator username: ').strip()
+    if not portal.is_valid_username_for_role(username, 'admin'):
+        print('Administrator username must be exactly 9 digits and start with 50.')
+        return 1
+
     full_name = input('Administrator full name: ').strip()
     email = input('Administrator email: ').strip()
     password = getpass('Administrator password (minimum 12 characters): ')
     confirmation = getpass('Confirm password: ')
 
-    if not username or not full_name:
-        print('Username and full name are required.')
+    if not full_name:
+        print('Administrator full name is required.')
         return 1
     if not portal.is_valid_email_address(email):
         print('Enter a valid administrator email address.')

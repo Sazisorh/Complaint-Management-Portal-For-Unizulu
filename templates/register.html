@@ -32,31 +32,14 @@
                 <label for="email">Email address for updates</label>
                 <input type="email" name="email" id="email" required maxlength="254" autocomplete="email" placeholder="you@example.com">
             </div>
-            <div class="form-group">
-                <label for="register-role">Account Type</label>
-                <select id="register-role" name="role" required>
-                    <option value="" selected disabled>Select Role</option>
-                    <option value="student">Student</option>
-                    <option value="staff">Staff Member</option>
-                    <option value="admin">System Administrator</option>
-                </select>
-            </div>
-            <div class="form-group is-hidden" id="register-department-group">
-                <label for="register-department">Department</label>
-                <select id="register-department" name="department">
-                    <option value="" selected disabled>Select Department</option>
-                    {% for department in departments %}
-                    <option value="{{ department }}">{{ department }}</option>
-                    {% endfor %}
-                </select>
-            </div>
+            <input type="hidden" name="role" value="student">
+            <p>Public registration is for students. Staff, management, and system administrator accounts must be created by an authorized system administrator.</p>
             <div class="form-group">
                 <label>Password</label>
                 <input type="password" name="password" required>
             </div>
             <button type="submit" class="btn">Register</button>
         </form>
-        <script src="{{ url_for('static', filename='js/register.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/password_toggle.js') }}" defer></script>
         <div class="links">
             <a href="{{ url_for('login') }}">Back to Login</a>
