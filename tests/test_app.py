@@ -541,6 +541,172 @@ def test_resend_email_status_requires_api_key(monkeypatch):
     assert status['missing'] == ['RESEND_API_KEY']
 
 
+def test_gmail_api_email_status_requires_oauth_credentials(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'gmail_api')
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_ID', None)
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_SECRET', None)
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_REFRESH_TOKEN', None)
+
+    status = app_module.get_email_status()
+
+    assert status['configured'] is False
+    assert status['missing'] == [
+        'GMAIL_OAUTH_CLIENT_ID',
+        'GMAIL_OAUTH_CLIENT_SECRET',
+        'GMAIL_OAUTH_REFRESH_TOKEN',
+    ]
+    assert status['auth_method'] == 'oauth2'
+
+
+def test_gmail_api_sends_base64url_mime_message(monkeypatch):
+    import base64
+    import json
+    from email.parser import BytesParser
+    from email.policy import default
+    from urllib.parse import parse_qs
+    import app as app_module
+
+    calls = []
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self, content=b''):
+            self.content = content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return self.content
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        if request.full_url == 'https://oauth2.googleapis.com/token':
+            return FakeResponse(b'{"access_token":"test-access-token"}')
+        return FakeResponse(b'{}')
+
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'gmail_api')
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 9)
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_ID', 'test-client-id')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_SECRET', 'test-client-secret')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_REFRESH_TOKEN', 'test-refresh-token')
+
+    assert app_module.send_email_notification(
+        'Test subject',
+        'Test body',
+        ['student@example.test', 'staff@example.test'],
+    ) is True
+    token_request, token_timeout = calls[0]
+    send_request, send_timeout = calls[1]
+    form = parse_qs(token_request.data.decode('ascii'))
+    assert token_request.full_url == 'https://oauth2.googleapis.com/token'
+    assert form == {
+        'client_id': ['test-client-id'],
+        'client_secret': ['test-client-secret'],
+        'grant_type': ['refresh_token'],
+        'refresh_token': ['test-refresh-token'],
+    }
+    assert token_timeout == 9
+    assert send_request.full_url == (
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages/send'
+    )
+    assert send_request.get_header('Authorization') == 'Bearer test-access-token'
+    assert send_timeout == 9
+    payload = json.loads(send_request.data.decode('utf-8'))
+    encoded_message = payload['raw']
+    raw_message = base64.urlsafe_b64decode(
+        encoded_message + '=' * (-len(encoded_message) % 4)
+    )
+    message = BytesParser(policy=default).parsebytes(raw_message)
+    assert message['Subject'] == 'Test subject'
+    assert message['From'] == 'sender@gmail.com'
+    assert message['To'] == 'student@example.test, staff@example.test'
+    assert message.get_content().strip() == 'Test body'
+
+
+def test_gmail_api_logs_token_failure_without_provider_response(monkeypatch, caplog):
+    import app as app_module
+
+    def fake_urlopen(request, timeout):
+        raise app_module.HTTPError(
+            request.full_url,
+            400,
+            'Bad Request',
+            {},
+            app_module.io.BytesIO(b'private provider response'),
+        )
+
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'gmail_api')
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_ID', 'test-client-id')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_SECRET', 'test-client-secret')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_REFRESH_TOKEN', 'test-refresh-token')
+
+    assert app_module.send_email_notification(
+        'Test subject',
+        'Test body',
+        ['student@example.test'],
+    ) is False
+    assert 'Gmail API access-token acquisition failed' in caplog.text
+    assert 'private provider response' not in caplog.text
+    assert 'test-refresh-token' not in caplog.text
+
+
+def test_gmail_api_logs_send_rejection_without_provider_response(monkeypatch, caplog):
+    import app as app_module
+
+    def fake_urlopen(request, timeout):
+        if request.full_url == 'https://oauth2.googleapis.com/token':
+            class FakeResponse:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return None
+
+                def read(self):
+                    return b'{"access_token":"test-access-token"}'
+
+            return FakeResponse()
+        raise app_module.HTTPError(
+            request.full_url,
+            403,
+            'Forbidden',
+            {},
+            app_module.io.BytesIO(b'private provider response'),
+        )
+
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(app_module, 'EMAIL_PROVIDER', 'gmail_api')
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'sender@gmail.com')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_ID', 'test-client-id')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_CLIENT_SECRET', 'test-client-secret')
+    monkeypatch.setattr(app_module, 'GMAIL_OAUTH_REFRESH_TOKEN', 'test-refresh-token')
+
+    assert app_module.send_email_notification(
+        'Test subject',
+        'Test body',
+        ['student@example.test'],
+    ) is False
+    assert 'Gmail API rejected the email request (HTTP 403)' in caplog.text
+    assert 'private provider response' not in caplog.text
+    assert 'test-access-token' not in caplog.text
+
+
 def test_email_notification_uses_outlook_oauth2(monkeypatch):
     import app as app_module
 

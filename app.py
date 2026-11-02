@@ -1,3 +1,4 @@
+import base64
 import io
 import hmac
 import json
@@ -846,6 +847,9 @@ EMAIL_AUTH_METHOD = os.getenv(
 EMAIL_OAUTH_CLIENT_ID = (os.getenv('EMAIL_OAUTH_CLIENT_ID') or '').strip() or None
 EMAIL_OAUTH_REFRESH_TOKEN = (os.getenv('EMAIL_OAUTH_REFRESH_TOKEN') or '').strip() or None
 EMAIL_OAUTH_TENANT = (os.getenv('EMAIL_OAUTH_TENANT') or 'consumers').strip()
+GMAIL_OAUTH_CLIENT_ID = (os.getenv('GMAIL_OAUTH_CLIENT_ID') or '').strip() or None
+GMAIL_OAUTH_CLIENT_SECRET = (os.getenv('GMAIL_OAUTH_CLIENT_SECRET') or '').strip() or None
+GMAIL_OAUTH_REFRESH_TOKEN = (os.getenv('GMAIL_OAUTH_REFRESH_TOKEN') or '').strip() or None
 
 
 def get_outlook_access_token():
@@ -873,6 +877,30 @@ def get_outlook_access_token():
     return access_token
 
 
+def get_gmail_api_access_token():
+    token_request = Request(
+        'https://oauth2.googleapis.com/token',
+        data=urlencode({
+            'client_id': GMAIL_OAUTH_CLIENT_ID,
+            'client_secret': GMAIL_OAUTH_CLIENT_SECRET,
+            'grant_type': 'refresh_token',
+            'refresh_token': GMAIL_OAUTH_REFRESH_TOKEN,
+        }).encode('ascii'),
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        method='POST',
+    )
+    try:
+        with urlopen(token_request, timeout=EMAIL_TIMEOUT) as response:
+            token_data = json.loads(response.read().decode('utf-8'))
+    except (HTTPError, URLError, OSError, ValueError) as error:
+        raise RuntimeError('Unable to obtain a Gmail API access token.') from error
+
+    access_token = token_data.get('access_token') if isinstance(token_data, dict) else None
+    if not isinstance(access_token, str) or not access_token:
+        raise RuntimeError('Google did not return a Gmail API access token.')
+    return access_token
+
+
 def get_email_status():
     missing = []
     if EMAIL_PROVIDER == 'resend':
@@ -880,6 +908,17 @@ def get_email_status():
             missing.append('RESEND_API_KEY')
         if not EMAIL_FROM:
             missing.append('EMAIL_FROM')
+    elif EMAIL_PROVIDER == 'gmail_api':
+        if not EMAIL_USERNAME:
+            missing.append('EMAIL_USERNAME')
+        if not EMAIL_FROM:
+            missing.append('EMAIL_FROM')
+        if not GMAIL_OAUTH_CLIENT_ID:
+            missing.append('GMAIL_OAUTH_CLIENT_ID')
+        if not GMAIL_OAUTH_CLIENT_SECRET:
+            missing.append('GMAIL_OAUTH_CLIENT_SECRET')
+        if not GMAIL_OAUTH_REFRESH_TOKEN:
+            missing.append('GMAIL_OAUTH_REFRESH_TOKEN')
     elif EMAIL_PROVIDER == 'smtp':
         for key, value in {
             'EMAIL_HOST': EMAIL_HOST,
@@ -915,12 +954,12 @@ def get_email_status():
         'configured': not missing,
         'missing': missing,
         'provider': EMAIL_PROVIDER,
-        'host': EMAIL_HOST,
+        'host': 'gmail.googleapis.com' if EMAIL_PROVIDER == 'gmail_api' else EMAIL_HOST,
         'from_address': EMAIL_FROM,
         'use_tls': EMAIL_USE_TLS,
         'use_ssl': EMAIL_USE_SSL,
         'timeout': EMAIL_TIMEOUT,
-        'auth_method': EMAIL_AUTH_METHOD,
+        'auth_method': 'oauth2' if EMAIL_PROVIDER == 'gmail_api' else EMAIL_AUTH_METHOD,
     }
 
 
@@ -951,6 +990,38 @@ def send_resend_email(subject, body, recipients):
         return False
     except (URLError, OSError, ValueError) as error:
         app.logger.error('Resend email delivery failed (%s).', type(error).__name__)
+        return False
+
+
+def send_gmail_api_email(message):
+    try:
+        access_token = get_gmail_api_access_token()
+    except RuntimeError:
+        app.logger.error('Gmail API access-token acquisition failed; verify Google OAuth credentials and consent.')
+        return False
+
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('ascii').rstrip('=')
+    gmail_request = Request(
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+        data=json.dumps({'raw': raw_message}).encode('utf-8'),
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+    try:
+        with urlopen(gmail_request, timeout=EMAIL_TIMEOUT) as response:
+            status_code = getattr(response, 'status', 200)
+        if not 200 <= status_code < 300:
+            app.logger.error('Gmail API rejected the email request (HTTP %s).', status_code)
+            return False
+        return True
+    except HTTPError as error:
+        app.logger.error('Gmail API rejected the email request (HTTP %s).', error.code)
+        return False
+    except (URLError, OSError, ValueError) as error:
+        app.logger.error('Gmail API email delivery failed (%s).', type(error).__name__)
         return False
 
 
@@ -1000,6 +1071,9 @@ def send_email_notification(subject, body, recipients):
     message['From'] = EMAIL_FROM
     message['To'] = ', '.join(recipients)
     message.set_content(body)
+
+    if EMAIL_PROVIDER == 'gmail_api':
+        return send_gmail_api_email(message)
 
     try:
         access_token = get_outlook_access_token() if EMAIL_AUTH_METHOD == 'oauth2' else None
