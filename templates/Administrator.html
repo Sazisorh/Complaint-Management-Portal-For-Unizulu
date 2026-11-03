@@ -186,6 +186,36 @@
                 </div>
             </div>
         </div>
+
+        <section class="card">
+            <h3>Online Users</h3>
+            {% if online_users_list %}
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in online_users_list %}
+                            <tr>
+                                <td>{{ user.full_name }}</td>
+                                <td>{{ user.username }}</td>
+                                <td><span class="badge badge-{{ user.role }}">{{ user.role|title }}</span></td>
+                                <td>{{ user.last_seen }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>No users are currently online.</p>
+            {% endif %}
+        </section>
     </div>
 
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>

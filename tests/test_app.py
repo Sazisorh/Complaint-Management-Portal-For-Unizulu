@@ -2295,31 +2295,45 @@ def test_administrator_cannot_view_or_download_management_reports():
     assert client.get('/management/generate_report').status_code == 302
 
 
-def test_management_can_see_who_is_online():
+def test_only_administrator_can_see_online_users_and_last_seen():
     from app import online_users
 
     online_users.clear()
+    last_seen = '2026-09-20 10:00:00'
     online_users['student1'] = {
         'username': 'student1',
         'full_name': 'Test Student',
         'role': 'student',
-        'last_seen': '2026-09-20 10:00:00',
+        'last_seen': last_seen,
     }
 
     try:
         client = app.test_client()
         with client.session_transaction() as session:
-            session['username'] = 'manager1'
-            session['full_name'] = 'Management User'
-            session['role'] = 'manager'
+            session['username'] = 'admin1'
+            session['full_name'] = 'System Administrator'
+            session['role'] = 'admin'
 
-        response = client.get('/management')
+        response = client.get('/administrator')
 
         assert response.status_code == 200
         html = response.get_data(as_text=True)
         assert 'Online Users' in html
         assert 'Test Student' in html
         assert 'student1' in html
+        assert last_seen in html
+
+        with client.session_transaction() as session:
+            session['username'] = 'manager1'
+            session['full_name'] = 'Management User'
+            session['role'] = 'manager'
+
+        response = client.get('/management')
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert 'Online Users' not in html
+        assert 'Test Student' not in html
+        assert last_seen not in html
     finally:
         online_users.clear()
 

@@ -1776,6 +1776,7 @@ def administrator():
         roles=system_roles,
         departments=departments,
         complaint_categories=complaint_categories,
+        online_users_list=get_online_users(),
     )
 
 
@@ -1788,7 +1789,6 @@ def management():
     return render_template(
         'management.html',
         analytics=build_admin_analytics(),
-        online_users_list=get_online_users(),
     )
 
 
