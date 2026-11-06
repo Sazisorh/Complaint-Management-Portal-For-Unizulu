@@ -1,3 +1,5 @@
+"""Run Microsoft OAuth consent and save Outlook SMTP credentials to .env."""
+
 import json
 import os
 import sys

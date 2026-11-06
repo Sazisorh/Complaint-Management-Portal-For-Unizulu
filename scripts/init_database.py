@@ -1,3 +1,5 @@
+"""Create or update the MySQL tables required by the grievance portal."""
+
 from pathlib import Path
 import sys
 

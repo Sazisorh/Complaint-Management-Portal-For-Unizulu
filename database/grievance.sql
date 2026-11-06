@@ -1,3 +1,4 @@
+-- Core relational schema for accounts, grievances, and uploaded evidence.
 CREATE DATABASE IF NOT EXISTS grievance_db;
 USE grievance_db;
 

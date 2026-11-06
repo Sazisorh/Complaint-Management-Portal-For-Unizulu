@@ -1,3 +1,5 @@
+"""Run Google OAuth consent and save Gmail API credentials to the local .env file."""
+
 import base64
 import hashlib
 import json

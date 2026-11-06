@@ -1,3 +1,4 @@
+// Apply role-specific username validation and handle an unavailable logo image.
 const roleSelect = document.getElementById('role');
 const usernameInput = document.getElementById('username');
 const logo = document.querySelector('.auth-login .logo');

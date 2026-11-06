@@ -1,3 +1,9 @@
+"""Flask application for student grievances, evidence, notifications, and dashboards.
+
+Routes use the shared state and service helpers below, then render templates or return
+JSON for the browser-side workflows.
+"""
+
 import base64
 import io
 import hmac
@@ -28,6 +34,7 @@ except ImportError:
     load_dotenv = None
 
 
+# Load local settings before initializing services that depend on environment variables.
 def load_environment_file(path=None):
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
@@ -92,6 +99,7 @@ def count_users_with_role(role, exclude_username=None):
     )
 
 
+# Keep JSON as the portable state store while synchronizing relational data when enabled.
 def persist_state(users_data=None, complaints_data=None, departments_data=None, categories_data=None, evidence_data=None):
     if app.config.get('TESTING'):
         return
@@ -123,6 +131,7 @@ def persist_state(users_data=None, complaints_data=None, departments_data=None, 
 
 
 def load_state():
+    """Load portal data from JSON, creating the default state file when needed."""
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     if not os.path.exists(DATA_FILE):
         default_users = DEFAULT_USERS_DB.copy()
@@ -164,6 +173,7 @@ def is_hashed_password(password):
     return isinstance(password, str) and password.startswith(('scrypt:', 'pbkdf2:'))
 
 
+# Normalize classifier and form values before assigning departments.
 def normalize_category(category):
     if not category:
         return 'Academic'
@@ -201,6 +211,7 @@ def get_department_for_category(category):
     return department_map.get(normalized, 'Academic Affairs')
 
 
+# Student assistant classification, safety cues, and response guidance.
 CHATBOT_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ML_model', 'complaint_classifier.pkl')
 CHATBOT_CATEGORY_MAP = {
     'Academics': 'Academic',
@@ -244,6 +255,7 @@ def load_chatbot_model():
 
 
 def classify_chatbot_message(message):
+    """Classify a grievance description and flag safety-related messages for review."""
     model = load_chatbot_model()
     probabilities = model.predict_proba([message])[0]
     labels = getattr(model, 'classes_', None)
@@ -366,6 +378,7 @@ def search_unizulu_information(query, cache_window):
     return pages
 
 
+# Assistant endpoints keep classification, chat, and official-information lookup separate.
 @app.route('/chatbot/unizulu-search', methods=['POST'])
 def chatbot_unizulu_search():
     if 'username' not in session or session.get('role') != 'student':
@@ -422,6 +435,7 @@ def filter_complaints_for_staff():
     return filtered
 
 
+# Database persistence and evidence-storage helpers.
 def get_database_connection():
     database_config = {
         'host': os.getenv('MYSQL_HOST'),
@@ -609,6 +623,7 @@ mysql_state_loaded = False
 
 @app.before_request
 def load_mysql_state_before_request():
+    """Initialize in-memory portal state from MySQL once, when database storage is enabled."""
     global mysql_state_loaded
     if app.config.get('TESTING') or mysql_state_loaded or not mysql_storage_enabled():
         return
@@ -624,6 +639,7 @@ def load_mysql_state_before_request():
 
 
 def migrate_legacy_evidence():
+    """Move any legacy upload-folder files into the database evidence table."""
     if not os.path.isdir(UPLOAD_FOLDER):
         return
 
@@ -690,6 +706,7 @@ def migrate_legacy_evidence():
 
 
 def save_uploaded_evidence(file_storage, complaint_id):
+    """Store an uploaded file and return metadata used by its complaint record."""
     if not file_storage or not file_storage.filename:
         return None
 
@@ -737,6 +754,7 @@ def get_evidence_preview_url(evidence_path):
 app.jinja_env.globals['get_evidence_preview_url'] = get_evidence_preview_url
 
 
+# Restrict evidence retrieval to the complaint owner and authorized staff/admin roles.
 @app.route('/evidence/<path:stored_filename>')
 def serve_evidence(stored_filename):
     if 'username' not in session:
@@ -785,6 +803,7 @@ def serve_evidence(stored_filename):
 
 
 def generate_reference_number():
+    """Build a reference from today's date and the next complaint ID."""
     count = max((int(item.get('id', 0)) for item in complaints_db), default=0) + 1
     today = datetime.now().strftime('%Y%m%d')
     return f'GRV-{today}-{count:04d}'
@@ -830,6 +849,7 @@ system_roles = ["student", "staff", "manager", "admin"]
 users_db, complaints_db, departments, complaint_categories, evidence_files = load_state()
 online_users = {}
 
+# Email provider settings and the delivery adapters used by portal notifications.
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_PROVIDER = (os.getenv('EMAIL_PROVIDER') or 'smtp').strip().casefold()
@@ -1203,6 +1223,7 @@ def send_status_update_notification(complaint, old_status, new_status):
 
 
 @app.before_request
+# Dashboard presence helpers and legacy asset routes retained for older links.
 def track_online_users():
     username = session.get('username')
     if not username:
@@ -1248,6 +1269,7 @@ def get_online_users():
 
 
 # Landing / Welcome Page
+# Public pages and authentication/account lifecycle routes.
 @app.route('/')
 def index_page():
     return render_template('index.html')
@@ -1455,6 +1477,7 @@ def reset_password(token):
     return render_template('reset_password.html')
 
 
+# Student dashboard, complaint submission, withdrawal, and reference lookup.
 @app.route('/student_dashboard')
 def student_dashboard():
     if 'username' not in session or session.get('role') != 'student':
@@ -1506,6 +1529,7 @@ def withdraw_grievance(complaint_id):
 
 @app.route('/submit_grievance', methods=['POST'])
 def submit_grievance():
+    """Validate a submission, save its evidence and record, then notify recipients."""
     wants_json = request.accept_mimetypes.best == 'application/json'
 
     if 'username' not in session:
@@ -1582,6 +1606,7 @@ def submit_grievance():
     return redirect(url_for('student_dashboard'))
 
 def get_complaint_by_reference(reference_number):
+    """Look up a reference only among complaints owned by the signed-in student."""
     if 'username' not in session:
         return None
 
@@ -1591,6 +1616,7 @@ def get_complaint_by_reference(reference_number):
     ), None)
 
 
+# Chatbot APIs used by the student page's guided assistant.
 @app.route('/chatbot/classify', methods=['POST'])
 def chatbot_classify():
     if 'username' not in session or session.get('role') != 'student':
@@ -1667,6 +1693,7 @@ def chatbot_chat():
     return jsonify({'reply': reply, **classification})
 
 
+# Student-only complaint status API and department-scoped staff workflow.
 @app.route('/complaint_status', methods=['POST'])
 def complaint_status_post():
     if 'username' not in session:
@@ -1754,6 +1781,7 @@ def update_status(complaint_id):
     return redirect(url_for('staff_dashboard'))
 
 # Administrator dashboard route
+# Administrator and management dashboards and account/configuration actions.
 @app.route('/administrator')
 def administrator():
     if 'username' not in session or session.get('role') != 'admin':
@@ -2133,6 +2161,7 @@ def generate_report():
     return response
 
 
+# Clear the authenticated session and return the user to the landing page.
 @app.route('/logout')
 def logout():
     username = session.get('username')

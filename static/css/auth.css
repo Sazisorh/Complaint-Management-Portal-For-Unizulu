@@ -1,4 +1,4 @@
-/* Shared authentication page layout */
+/* Shared layout and form states for login, registration, and password recovery. */
 * {
   box-sizing: border-box;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;

@@ -1,3 +1,4 @@
+// Drive the student dashboard's chatbot, guided submission, and status lookup flows.
 const latestReferenceElement = document.getElementById('latest-reference');
 const latestReference = latestReferenceElement?.dataset.reference || 'No reference yet';
 const chatbotToggle = document.getElementById('chatbot-toggle');

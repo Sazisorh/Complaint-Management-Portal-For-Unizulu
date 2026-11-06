@@ -1,3 +1,4 @@
+// Add accessible show/hide controls to password inputs that do not already have one.
 document.querySelectorAll('input[type="password"]').forEach((input) => {
     if (input.parentElement.classList.contains('password-field')) {
         return;

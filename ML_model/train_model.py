@@ -1,3 +1,5 @@
+"""Train and save the text classifier used to suggest grievance categories."""
+
 import os
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer

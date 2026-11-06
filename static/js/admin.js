@@ -1,3 +1,4 @@
+// Keep administrator-created usernames aligned with the role-specific ID format.
 const newUserRole = document.getElementById('new-user-role');
 const newUserUsername = document.getElementById('new-user-username');
 

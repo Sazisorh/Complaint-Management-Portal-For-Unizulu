@@ -1,3 +1,5 @@
+"""Interactively create a management account in the portal state."""
+
 from getpass import getpass
 from pathlib import Path
 import sys

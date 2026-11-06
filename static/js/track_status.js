@@ -1,3 +1,4 @@
+// Submit a reference lookup and render the returned complaint status.
 const statusInput = document.getElementById('status-reference');
 const statusResult = document.getElementById('track-status-result');
 const statusCheckBtn = document.getElementById('status-check-btn');

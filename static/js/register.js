@@ -1,3 +1,4 @@
+// Keep registration fields and browser validation in sync with the selected role.
 const registrationRole = document.getElementById('register-role');
 const registrationUsername = document.getElementById('register-username');
 const registrationDepartmentGroup = document.getElementById('register-department-group');

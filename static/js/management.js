@@ -1,3 +1,4 @@
+// Render the category and status analytics from counts embedded in the page.
 const categoryData = JSON.parse(document.body.dataset.categoryCounts);
 const statusData = JSON.parse(document.body.dataset.statusCounts);
 

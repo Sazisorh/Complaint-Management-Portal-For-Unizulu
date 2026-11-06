@@ -1,3 +1,5 @@
+"""Verify Gmail OAuth setup, PKCE handling, and safe .env updates."""
+
 import base64
 import hashlib
 import importlib.util
