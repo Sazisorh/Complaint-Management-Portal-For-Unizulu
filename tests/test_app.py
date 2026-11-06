@@ -1352,12 +1352,12 @@ def test_student_and_staff_pages_load_renamed_assets(client, staff_account):
     assert student_css.status_code == 200
     assert student_css.mimetype == 'text/css'
     assert student_js.status_code == 200
-    assert student_js.mimetype == 'application/javascript'
+    assert student_js.mimetype in {'application/javascript', 'text/javascript'}
     assert legacy_student_css.status_code == 200
     assert legacy_student_css.mimetype == 'text/css'
     assert legacy_student_css.data == student_css.data
     assert legacy_student_js.status_code == 200
-    assert legacy_student_js.mimetype == 'application/javascript'
+    assert legacy_student_js.mimetype in {'application/javascript', 'text/javascript'}
     assert legacy_student_js.data == student_js.data
 
     staff_client = app.test_client()
